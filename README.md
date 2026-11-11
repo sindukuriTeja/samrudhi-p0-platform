@@ -52,15 +52,30 @@ samrudhi-p0/
 │   └── tasks.py                 # run_agent_task dispatcher
 ├── agents/
 │   ├── base.py                  # BaseAgent + dynamic registry loader
-│   ├── SAM-AG-001_Arjun/        # AI CEO
-│   ├── SAM-AG-007_Sutra/        # AI CTO
-│   ├── SAM-AG-010_Satya/        # Chief Assurance Agent
-│   └── SAM-AG-158_Niyantrak/    # AgentOps & DWMS Lead
+│   ├── SAM-AG-001_Arjun/        # AI CEO (Stage 1A)
+│   ├── SAM-AG-007_Sutra/        # AI CTO (Stage 1A)
+│   ├── SAM-AG-010_Satya/        # Chief Assurance Agent (Stage 1A)
+│   ├── SAM-AG-158_Niyantrak/    # AgentOps & DWMS Lead (Stage 1A)
+│   ├── SAM-AG-153_Vinyas/       # Platform architecture service (Stage 1B)
+│   ├── SAM-AG-154_Setubandh/    # MCP connector service (Stage 1B)
+│   ├── SAM-AG-155_Yantra/       # Runtime orchestration service (Stage 1B)
+│   ├── SAM-AG-156_Smaran/       # Context/memory service (Stage 1B)
+│   ├── SAM-AG-157_Suraksha/     # Security enforcement service (Stage 1B)
+│   ├── SAM-AG-159_Pehchaan/     # Identity registry service (Stage 1B)
+│   ├── SAM-AG-160_Jod/          # Integration connector service (Stage 1B)
+│   ├── SAM-AG-161_Adhikar/      # Permission/access service (Stage 1B)
+│   ├── SAM-AG-162_Pravahika/    # Workflow orchestration service (Stage 1B)
+│   ├── SAM-AG-163_Sandarbhika/  # Context retrieval service (Stage 1B)
+│   ├── SAM-AG-166_Nirikshak/    # Telemetry/monitoring service (Stage 1B)
+│   ├── SAM-AG-167_Parikshak/    # Testing/QA service (Stage 1B)
+│   ├── SAM-AG-168_Sanskaran/    # Version control service (Stage 1B)
+│   └── SAM-AG-170_Chaukidar/    # Security monitoring service (Stage 1B)
 ├── tests/
 │   ├── conftest.py              # SQLite test DB setup
 │   ├── test_authority.py        # authority guard tests
 │   ├── test_message_bus.py      # durable bus tests
-│   └── test_stage1a_agents.py   # Stage 1A agent tests
+│   ├── test_stage1a_agents.py   # Stage 1A agent tests
+│   └── test_stage1b_agents.py   # Stage 1B agent tests
 ├── requirements.txt
 └── pytest.ini
 ```
@@ -106,9 +121,10 @@ celery -A workers.celery_app worker --loglevel=info
 
 ## Current Status
 
-- **Phase 0 (Platform):** ✅ Complete — DB models, message bus, authority guard, auth, LLM queue, lifecycle gate, FastAPI, Celery. 6 tests passing.
-- **Stage 1A (Core agents):** ✅ Complete — Arjun, Sutra, Satya, Niyantrak. 10 tests passing.
-- **Total tests:** 16 passing.
+- **Phase 0 (Platform):** ✅ Complete — DB models, message bus, authority guard, auth, LLM queue, lifecycle gate, FastAPI, Celery.
+- **Stage 1A (Core agents):** ✅ Complete — Arjun, Sutra, Satya, Niyantrak.
+- **Stage 1B (Technology services):** ✅ Complete — 14 service-first agents (Vinyas, Setubandh, Yantra, Smaran, Suraksha, Pehchaan, Jod, Adhikar, Pravahika, Sandarbhika, Nirikshak, Parikshak, Sanskaran, Chaukidar). All enforce authority guard; graceful model-unavailable handling.
+- **Total tests:** 33 passing.
 
 ## Next Steps (per build plan)
 
