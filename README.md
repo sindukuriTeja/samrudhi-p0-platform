@@ -53,9 +53,12 @@ samrudhi-p0/
 ├── agents/
 │   ├── base.py                  # BaseAgent + dynamic registry loader
 │   ├── SAM-AG-001_Arjun/        # AI CEO (Stage 1A)
+│   ├── SAM-AG-002_Daksh/        # AI COO — Delivery Orchestrator (Phase 1)
+│   ├── SAM-AG-003_Aarya/        # AI CCO — Creative/Content (Phase 1)
+│   ├── SAM-AG-004_Mitra/        # AI CXO — Client Experience (Phase 1)
 │   ├── SAM-AG-007_Sutra/        # AI CTO (Stage 1A)
+│   ├── SAM-AG-009_Medha/        # AI Head of Intelligence (Phase 1)
 │   ├── SAM-AG-010_Satya/        # Chief Assurance Agent (Stage 1A)
-│   ├── SAM-AG-158_Niyantrak/    # AgentOps & DWMS Lead (Stage 1A)
 │   ├── SAM-AG-011_Prakash/      # Compliance verification (Stage 1C)
 │   ├── SAM-AG-012_Rajat/        # Risk assessment (Stage 1C)
 │   ├── SAM-AG-013_Niti/         # Policy governance (Stage 1C)
@@ -73,6 +76,7 @@ samrudhi-p0/
 │   ├── SAM-AG-155_Yantra/       # Runtime orchestration service (Stage 1B)
 │   ├── SAM-AG-156_Smaran/       # Context/memory service (Stage 1B)
 │   ├── SAM-AG-157_Suraksha/     # Security enforcement service (Stage 1B)
+│   ├── SAM-AG-158_Niyantrak/    # AgentOps & DWMS Lead (Stage 1A)
 │   ├── SAM-AG-159_Pehchaan/     # Identity registry service (Stage 1B)
 │   ├── SAM-AG-160_Jod/          # Integration connector service (Stage 1B)
 │   ├── SAM-AG-161_Adhikar/      # Permission/access service (Stage 1B)
@@ -88,7 +92,8 @@ samrudhi-p0/
 │   ├── test_message_bus.py      # durable bus tests
 │   ├── test_stage1a_agents.py   # Stage 1A agent tests
 │   ├── test_stage1b_agents.py   # Stage 1B agent tests
-│   └── test_stage1c_agents.py   # Stage 1C agent tests
+│   ├── test_stage1c_agents.py   # Stage 1C agent tests
+│   └── test_phase1_agents.py    # Phase 1 P1 agent tests
 ├── requirements.txt
 └── pytest.ini
 ```
@@ -138,7 +143,8 @@ celery -A workers.celery_app worker --loglevel=info
 - **Stage 1A (Core agents):** ✅ Complete — Arjun, Sutra, Satya, Niyantrak.
 - **Stage 1B (Technology services):** ✅ Complete — 14 service-first agents (Vinyas, Setubandh, Yantra, Smaran, Suraksha, Pehchaan, Jod, Adhikar, Pravahika, Sandarbhika, Nirikshak, Parikshak, Sanskaran, Chaukidar). All enforce authority guard; graceful model-unavailable handling.
 - **Stage 1C (Assurance agents):** ✅ Complete — 12 thinking agents under Satya (Prakash, Rajat, Niti, Satark, Sachit, Pramaan, Aarogya, Samay, Sabhyata, Ansh, Benchmark, Satark2). Full assurance spectrum: compliance, risk, policy, security, evidence, certification, quality, SLA, audit, incidents, benchmarking, anomaly detection.
-- **Total tests:** 54 passing.
+- **Phase 1 (P1 Pilot Leadership):** ✅ Complete — 4 executive agents (Daksh COO, Aarya CCO, Mitra CXO, Medha Intelligence). Each has 13 authority-guarded tools, 5 registers (20 new DB tables), workflow state machines, and full I/O contracts. Build order: Daksh → Aarya → Mitra → Medha.
+- **Total tests:** 86 passing.
 
 ## Next Steps (per build plan)
 
