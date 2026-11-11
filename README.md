@@ -56,6 +56,18 @@ samrudhi-p0/
 │   ├── SAM-AG-007_Sutra/        # AI CTO (Stage 1A)
 │   ├── SAM-AG-010_Satya/        # Chief Assurance Agent (Stage 1A)
 │   ├── SAM-AG-158_Niyantrak/    # AgentOps & DWMS Lead (Stage 1A)
+│   ├── SAM-AG-011_Prakash/      # Compliance verification (Stage 1C)
+│   ├── SAM-AG-012_Rajat/        # Risk assessment (Stage 1C)
+│   ├── SAM-AG-013_Niti/         # Policy governance (Stage 1C)
+│   ├── SAM-AG-014_Satark/       # Security review (Stage 1C)
+│   ├── SAM-AG-015_Sachit/       # Evidence management (Stage 1C)
+│   ├── SAM-AG-016_Pramaan/      # Certification (Stage 1C)
+│   ├── SAM-AG-017_Aarogya/      # Quality assurance (Stage 1C)
+│   ├── SAM-AG-018_Samay/        # SLA monitoring (Stage 1C)
+│   ├── SAM-AG-019_Sabhyata/     # Audit trail (Stage 1C)
+│   ├── SAM-AG-020_Ansh/         # Incident response (Stage 1C)
+│   ├── SAM-AG-021_Benchmark/    # Benchmarking (Stage 1C)
+│   ├── SAM-AG-022_Satark2/      # Anomaly detection (Stage 1C)
 │   ├── SAM-AG-153_Vinyas/       # Platform architecture service (Stage 1B)
 │   ├── SAM-AG-154_Setubandh/    # MCP connector service (Stage 1B)
 │   ├── SAM-AG-155_Yantra/       # Runtime orchestration service (Stage 1B)
@@ -75,7 +87,8 @@ samrudhi-p0/
 │   ├── test_authority.py        # authority guard tests
 │   ├── test_message_bus.py      # durable bus tests
 │   ├── test_stage1a_agents.py   # Stage 1A agent tests
-│   └── test_stage1b_agents.py   # Stage 1B agent tests
+│   ├── test_stage1b_agents.py   # Stage 1B agent tests
+│   └── test_stage1c_agents.py   # Stage 1C agent tests
 ├── requirements.txt
 └── pytest.ini
 ```
@@ -124,7 +137,8 @@ celery -A workers.celery_app worker --loglevel=info
 - **Phase 0 (Platform):** ✅ Complete — DB models, message bus, authority guard, auth, LLM queue, lifecycle gate, FastAPI, Celery.
 - **Stage 1A (Core agents):** ✅ Complete — Arjun, Sutra, Satya, Niyantrak.
 - **Stage 1B (Technology services):** ✅ Complete — 14 service-first agents (Vinyas, Setubandh, Yantra, Smaran, Suraksha, Pehchaan, Jod, Adhikar, Pravahika, Sandarbhika, Nirikshak, Parikshak, Sanskaran, Chaukidar). All enforce authority guard; graceful model-unavailable handling.
-- **Total tests:** 33 passing.
+- **Stage 1C (Assurance agents):** ✅ Complete — 12 thinking agents under Satya (Prakash, Rajat, Niti, Satark, Sachit, Pramaan, Aarogya, Samay, Sabhyata, Ansh, Benchmark, Satark2). Full assurance spectrum: compliance, risk, policy, security, evidence, certification, quality, SLA, audit, incidents, benchmarking, anomaly detection.
+- **Total tests:** 54 passing.
 
 ## Next Steps (per build plan)
 
