@@ -133,8 +133,13 @@ HARD RULES — NEVER VIOLATE
         workflow_id: str,
         to_status: str,
         evidence: str | None = None,
+        from_status: str | None = "created",
     ) -> dict:
-        """Transition a workflow through its state machine."""
+        """Transition a workflow through its state machine.
+
+        Enforces the state machine: only valid transitions from from_status are allowed.
+        Defaults from_status to 'created' for the first transition.
+        """
         valid_transitions = {
             "created": ["planning"],
             "planning": ["allocated", "blocked"],
@@ -145,8 +150,7 @@ HARD RULES — NEVER VIOLATE
             "delivered": [],
             "blocked": ["planning", "executing"],
         }
-        allowed = valid_transitions.get(to_status, [])
-        # Simplified: accept any valid target status
+        # Validate target status is known
         if to_status not in valid_transitions:
             return {
                 "workflow_id": workflow_id,
@@ -154,9 +158,20 @@ HARD RULES — NEVER VIOLATE
                 "message": f"Unknown status: {to_status}",
                 "valid_statuses": list(valid_transitions.keys()),
             }
+        # Validate transition is allowed from current state
+        allowed_next = valid_transitions.get(from_status, [])
+        if to_status not in allowed_next:
+            return {
+                "workflow_id": workflow_id,
+                "error": "invalid_transition",
+                "message": f"Cannot transition from '{from_status}' to '{to_status}'",
+                "from_status": from_status,
+                "allowed_next": allowed_next,
+            }
         return {
             "workflow_id": workflow_id,
             "new_status": to_status,
+            "from_status": from_status,
             "evidence": evidence,
             "transitioned_at": datetime.now(timezone.utc).isoformat(),
         }
