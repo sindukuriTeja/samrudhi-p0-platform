@@ -13,16 +13,21 @@
 #
 # Step fields
 #   key, block, agent, tag, responsibility, gives
-#   think: action, permission, instruction, inputs (step keys whose latest result is handed over)
-#          verdict: true  -> the agent must end with "VERDICT: PASS" or "VERDICT: SEND BACK - reasons"
+#   think: action, permission, instruction, inputs (step keys whose structured record is handed over)
+#          output: the JSON shape the agent must return (validated in code; asked again once if wrong)
+#          count:  a list in the output that must hold exactly one item per post in the scope
+#          verdict: true  -> the output's "verdict" (pass | send_back) decides the send-back loop
 #   tool:  method, args (placeholders below), pass_if (field: value), on_fail (send_back | block)
 #   send_back: the steps that run again as a new round, then every check from recheck_from
+#   override: values set in code after validation (the model cannot decide them)
+#   note: a fixed line shown above the step's result
 #   approval: a human gate after the step (question, why, rerun = steps re-run on changes/retry)
 #
 # Placeholders in tool args
 #   $project_id $project_name $client_id $today $scope $routing $active_agents $chain_permissions
 #   $checks $required_checks $tokens_total $model_steps $accepted_deliverables $cost_per_1k_tokens
 #   $send_back_reasons $rework_round $result:<step>.<field> $output:<step>
+#   $text:<step> (all text in a step's structured record) $data:<step> (the record itself)
 
 default_flow: documented_chain
 
@@ -62,6 +67,7 @@ flows:
 
       # ---------------- Block 2: Kick-off ----------------
       - key: kickoff
+        output: {goal: str, priority: str, deadline: str, owners: [{area: str, owner: str}], risks: [str]}
         block: 2
         agent: SAM-AG-001                # Arjun - AI CEO
         mode: think
@@ -86,6 +92,7 @@ flows:
 
       # ---------------- Block 3: Understand the client ----------------
       - key: client_expectations
+        output: {client: str, expectations: [str], sign_off_required: [str], approval_rules: [str]}
         block: 3
         agent: SAM-AG-004                # Mitra - AI CXO
         mode: think
@@ -100,6 +107,7 @@ flows:
           sign-off before anything is published. Use only what is known; mark the rest
           unavailable. Keep it under 120 words.
       - key: client_context
+        output: {brand_voice: str, services: [str], audience: str, forbidden_claims: [str], unavailable: [str]}
         block: 3
         agent: SAM-AG-049                # Smriti - Client Knowledge
         mode: think
@@ -114,6 +122,7 @@ flows:
           forbidden claims. Do not invent facts; anything not on record is unavailable. Keep it
           under 120 words.
       - key: brief
+        output: {objective: str, audience: str, deliverables: [str], deadline: str, limits: [str]}
         block: 3
         agent: SAM-AG-050                # Shruti - Client Brief & Requirements
         mode: think
@@ -129,6 +138,7 @@ flows:
 
       # ---------------- Block 4: Plan the delivery ----------------
       - key: workflow
+        output: {order: [str], priority: str, notes: str}
         block: 4
         agent: SAM-AG-002                # Daksh - AI COO
         mode: think
@@ -142,6 +152,7 @@ flows:
           Decide the delivery order and priority for this brief: planning, content, checks,
           approval, publishing and reporting. Keep it under 100 words.
       - key: delivery_plan
+        output: {workstreams: [str], milestones: [{name: str, due: str}]}
         block: 4
         agent: SAM-AG-059                # Yojana - Delivery Planning Lead
         mode: think
@@ -215,6 +226,7 @@ flows:
 
       # ---------------- Block 5: Decide the content ----------------
       - key: creative_request
+        output: {quality_bar: [str], brand_rules: [str], research_questions: [str]}
         block: 5
         agent: SAM-AG-003                # Aarya - AI CCO
         mode: think
@@ -228,6 +240,11 @@ flows:
           Set the quality bar for this work: what good looks like, the brand rules that must hold
           and what the research must answer. Keep it under 100 words.
       - key: research
+        output: {facts: [{fact: str, source: str, verified: bool}], excluded: [str]}
+        override: {"facts[].verified": false}     # set in code: no live source connector exists yet
+        note: >-
+          No live source connector is set up, so every fact below is marked not verified. The
+          organisations named are where the agent says the fact comes from; check them before publishing.
         block: 5
         agent: SAM-AG-081                # Anvesh - Healthcare Content Research
         mode: think
@@ -242,6 +259,8 @@ flows:
           you rely on for each fact and mark every fact "not verified against a live source". Do not
           invent quotes or numbers. Keep it under 150 words.
       - key: direction
+        output: {themes: [str], tone: str, pieces: [{topic: str, key_message: str, call_to_action: str}]}
+        count: {field: pieces, scope: social_posts}
         block: 5
         agent: SAM-AG-076                # Disha - Content Strategy & Research Lead
         mode: think
@@ -255,6 +274,8 @@ flows:
           Choose the content themes, the tone and one key message per piece. Do not write the
           posts. Keep it under 120 words.
       - key: calendar
+        output: {posts: [{date: str, theme: str, brief: str}]}
+        count: {field: posts, scope: social_posts}
         block: 5
         agent: SAM-AG-077                # Kalpana - Editorial Planning Lead
         mode: think
@@ -268,6 +289,8 @@ flows:
           Build the content calendar: one line per post with date, theme and a one-sentence brief.
           Use the package deadlines. Keep it under 120 words.
       - key: distribution
+        output: {posts: [{post: str, platform: str, format: str, time: str}]}
+        count: {field: posts, scope: social_posts}
         block: 5
         agent: SAM-AG-079                # Tarangini - Social Media & Distribution Lead
         mode: think
@@ -289,6 +312,8 @@ flows:
 
       # ---------------- Block 6: Make the content ----------------
       - key: writing
+        output: {posts: [{headline: str, caption: str, call_to_action: str}]}
+        count: {field: posts, scope: social_posts}
         block: 6
         agent: SAM-AG-082                # Lekha - Healthcare Copywriting
         mode: think
@@ -304,6 +329,8 @@ flows:
           Write the copy for every post in the calendar: caption, headline and one call to action.
           Use only the research facts. No medical advice, no cure claims. Write only the posts.
       - key: design_brief
+        output: {briefs: [{post: str, layout: str, visual_idea: str, text_on_image: str}]}
+        count: {field: briefs, scope: social_posts}
         block: 6
         agent: SAM-AG-078                # Roop - Creative Production Lead
         mode: think
@@ -318,6 +345,8 @@ flows:
           Write a design brief per post: layout, visual idea and the text on the image. Keep it
           under 150 words.
       - key: artwork
+        output: {specs: [{post: str, size: str, layout: str, colours: str, image_subject: str, text_placement: str}]}
+        count: {field: specs, scope: social_posts}
         block: 6
         agent: SAM-AG-083                # Chitra - Visual Creative Production
         mode: think
@@ -335,6 +364,7 @@ flows:
 
       # ---------------- Block 7: Check the content ----------------
       - key: shuddhi
+        output: {issues: [{post: str, problem: str, fix: str}], verdict: str, reasons: str}
         block: 7
         agent: SAM-AG-080                # Shuddhi - Content Quality & Clinical Screening
         mode: think
@@ -350,6 +380,7 @@ flows:
           and brand problems. Do not rewrite the posts. List each problem in one line.
         send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
       - key: pariksha
+        output: {checks: [{post: str, check: str, result: str}], verdict: str, reasons: str}
         block: 7
         agent: SAM-AG-094                # Pariksha - Platform & Technical Content QA
         mode: think
@@ -372,7 +403,7 @@ flows:
         responsibility: Scores quality independently
         gives: Score to Swasthya
         method: evaluate_output
-        args: {content: $output:writing, producer_agent: SAM-AG-082, required_elements: []}
+        args: {content: $text:writing, producer_agent: SAM-AG-082, required_elements: []}
         pass_if: {passed: true}
         on_fail: send_back
         send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
@@ -384,7 +415,7 @@ flows:
         responsibility: Blocks high-risk medical and advertising claims
         gives: Pass or block, to Gopniya
         method: screen_claims
-        args: {content: $output:writing}
+        args: {content: $text:writing}
         pass_if: {status: pass}
         on_fail: send_back
         send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
@@ -396,7 +427,7 @@ flows:
         responsibility: Checks no personal or other-client data appears
         gives: Privacy pass to Nirikshan
         method: check_privacy
-        args: {content: $output:writing}
+        args: {content: $text:writing}
         pass_if: {status: pass}
         on_fail: send_back
         send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
@@ -444,6 +475,7 @@ flows:
 
       # ---------------- Block 8: Send and publish ----------------
       - key: client_update
+        output: {subject: str, message: str}
         block: 8
         agent: SAM-AG-051                # Sandesh - Client Communication
         mode: think
@@ -510,6 +542,7 @@ flows:
         gives: Performance notes to Prativedan
         reason: No published posts to measure.
       - key: client_report
+        output: {produced: [str], approved: [str], scheduled: [str], performance: str}
         block: 9
         agent: SAM-AG-125                # Prativedan - Client Reporting
         mode: think
@@ -541,6 +574,7 @@ flows:
         method: summarise_run_cost
         args: {tokens: $tokens_total, steps: $model_steps, accepted_deliverables: $accepted_deliverables, cost_per_1k_tokens: $cost_per_1k_tokens}
       - key: intelligence
+        output: {summary: str, figures: [{name: str, value: str}], unavailable: [str]}
         block: 9
         agent: SAM-AG-009                # Medha - AI Chief Data & Intelligence Officer
         mode: think
@@ -556,6 +590,7 @@ flows:
 
       # ---------------- Block 10: Close ----------------
       - key: kpi_status
+        output: {status: str, gaps: [str], next_measures: [str]}
         block: 10
         agent: SAM-AG-012                # Lakshya - Enterprise KPI Intelligence
         mode: think
@@ -569,6 +604,7 @@ flows:
           Compare the results with the targets. If no targets or results exist, say so plainly and
           list what must be measured next. Keep it under 80 words.
       - key: review_notes
+        output: {notes: [str], actions: [{action: str, owner: str}]}
         block: 10
         agent: SAM-AG-053                # Samiksha - Client Review Intelligence
         mode: think
@@ -591,6 +627,7 @@ flows:
         method: close_action
         args: {action_id: $result:actions.record_id, evidence: $project_id}
       - key: final_brief
+        output: {done: [str], decisions: [str], cost: str, risks: [str]}
         block: 10
         agent: SAM-AG-001                # Arjun - AI CEO (second time)
         mode: think

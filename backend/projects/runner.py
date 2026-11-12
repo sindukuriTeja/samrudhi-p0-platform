@@ -28,6 +28,8 @@ from backend.database import async_session_maker
 from backend.models import Agent, Approval, ExecutionLog
 from backend.models.projects import ApprovalDecision, Project, ProjectMessage, ProjectStep
 from backend.projects import dispatch as dispatcher
+from backend.projects import registers
+from backend.projects import schema
 from backend.projects.common import (
     ENDED_PROJECT_STATES, RUNNABLE_STATES, new_approval_id, utcnow,
 )
@@ -184,6 +186,13 @@ async def _resolve(value, s, p: Project, step: ProjectStep, flow: dict):
         return ((st.result_json or {}) if st else {}).get(field)
     if name.startswith("output:"):
         return await _output(s, p.id, name[len("output:"):])
+    if name.startswith("text:") or name.startswith("data:"):
+        key = name.split(":", 1)[1]
+        st = await _latest(s, p.id, key)
+        data = schema.public(st.result_json) if st else {}
+        if name.startswith("data:"):
+            return data
+        return schema.flatten_text(data) if data else await _output(s, p.id, key)
     if name == "project_id":
         return p.id
     if name == "project_name":
@@ -364,6 +373,8 @@ class ProjectRunner:
             step_id = step.id
             args = [step.agent_id, task_text, p.client_id, p.id]
             kwargs = {"action": d.get("action"), "context": context}
+            if d.get("output"):
+                kwargs["output_format"] = "json"
         await notify("project", pid)
 
         async def _on_ref(ref: str) -> None:
@@ -380,28 +391,51 @@ class ProjectRunner:
         names = await _agent_names(s)
         humans = await _human_texts(s, p.id)
         handed_over = []
+        flow = get_flow(p.flow_key)
         for key in d.get("inputs") or []:
-            text = await _output(s, p.id, key)
-            if text:
-                src = await _latest(s, p.id, key)
-                handed_over.append({
-                    "from": names.get(src.agent_id, src.agent_id) if src else key,
-                    "step": (step_def(get_flow(p.flow_key), key) or {}).get("tag", key),
-                    "result": (text[:INPUT_CHARS] + "…") if len(text) > INPUT_CHARS else text,
-                })
+            src = await _latest(s, p.id, key)
+            if src is None:
+                continue
+            data = schema.public(src.result_json)
+            item = {"from": names.get(src.agent_id, src.agent_id),
+                    "step": (step_def(flow, key) or {}).get("tag", key)}
+            if data:
+                item["record"] = schema.trim(data)          # the whole structured record
+            else:
+                text = await _output(s, p.id, key)
+                if not text:
+                    continue
+                item["result"] = (text[:INPUT_CHARS] + "…") if len(text) > INPUT_CHARS else text
+            handed_over.append(item)
         note = (step.result_json or {}).get("revision_note")
         if step.source_approval_id and not note:
             dec = (await s.execute(select(ApprovalDecision).where(
                 ApprovalDecision.request_id == step.source_approval_id))).scalars().first()
             note = dec.note if dec else None
-        previous_own = await _output(s, p.id, step.step_key) if step.round > 1 else ""
+        previous_own = ""
+        if step.round > 1:
+            prev = await _latest(s, p.id, step.step_key)
+            prev_data = schema.public(prev.result_json) if prev else {}
+            previous_own = json.dumps(prev_data, ensure_ascii=False) if prev_data else await _output(s, p.id, step.step_key)
 
         parts = [d.get("instruction", "").strip(), f"Project: {p.name}."]
         if humans:
             parts.append("Instructions from the human team: " + " | ".join(humans))
         if note:
             parts.append(f"This is round {step.round}. Revise your earlier work using this feedback: {note}")
-        if d.get("verdict"):
+        if d.get("output"):
+            shape = json.dumps(schema.example(d["output"]), ensure_ascii=False)
+            parts.append("Answer with ONE JSON object in exactly this shape (same keys; lists may hold as many "
+                         f"items as needed): {shape}. Write \"unavailable\" for anything you do not know.")
+            count = await self._expected_count(s, p, d)
+            if count:
+                parts.append(f"The list \"{d['count']['field']}\" must contain exactly {count} items, one per post.")
+            if d.get("verdict"):
+                parts.append('Set "verdict" to "pass" or "send_back", and give the reasons in "reasons".')
+            errs = (step.result_json or {}).get("_format_errors")
+            if errs:
+                parts.append("Your previous answer was not accepted: " + "; ".join(errs) + ". Fix these.")
+        elif d.get("verdict"):
             parts.append("End your answer with one final line: VERDICT: PASS, or VERDICT: SEND BACK - <short reasons>.")
         context = {
             "project_id": p.id, "project": p.name, "client_id": p.client_id,
@@ -413,6 +447,13 @@ class ProjectRunner:
         if note:
             context["revision_note"] = note
         return "\n".join(x for x in parts if x), context
+
+    async def _expected_count(self, s, p: Project, d: dict) -> int | None:
+        rule = d.get("count")
+        if not rule:
+            return None
+        scope = _scope(get_flow(p.flow_key), await _human_texts(s, p.id))
+        return int(scope.get(rule.get("scope", "social_posts"), 0)) or None
 
     async def _run_tool(self, s, p: Project, step: ProjectStep, d: dict, flow: dict) -> bool:
         from agents.base import get_agent_module
@@ -464,6 +505,35 @@ class ProjectRunner:
             if err:
                 return await self._block(s, p, st, err)
             structured, passed = None, True
+            if d.get("output"):
+                data = schema.extract_json(output)
+                errs = ["the answer was not a JSON object"] if data is None else schema.validate(data, d["output"])
+                count = await self._expected_count(s, p, d)
+                if data is not None and not errs and count:
+                    got = len(data.get(d["count"]["field"]) or [])
+                    if got != count:
+                        errs.append(f"{d['count']['field']} has {got} items but the project needs {count}")
+                if errs:
+                    attempts = int((st.result_json or {}).get("_attempts", 0))
+                    if attempts < 1:
+                        # Ask the same agent once more, telling it exactly what was wrong.
+                        st.status, st.started_at, st.ended_at = "queued", None, None
+                        st.result_json = {**(st.result_json or {}), "_attempts": attempts + 1, "_format_errors": errs[:6]}
+                        s.add(_sys_msg(pid, f"{st.tag}: the answer did not match the required structure "
+                                            f"({'; '.join(errs[:3])}). Asking again.", "format", st.id))
+                        await s.commit()
+                        await notify("project", pid)
+                        return True
+                    return await self._block(s, p, st, "The answer did not match the required structure after "
+                                                       "two tries: " + "; ".join(errs[:4]))
+                structured = schema.apply_overrides(schema.coerce(data, d["output"]), d.get("override"))
+                if d.get("verdict"):
+                    verdict = str(structured.get("verdict", "pass")).lower().replace(" ", "_").replace("-", "_")
+                    passed = verdict not in ("send_back", "sendback", "fail", "reject")
+                    if not passed:
+                        structured["reasons"] = structured.get("reasons") or "No reason given."
+                return await self._complete(s, p, st, d, flow, structured,
+                                            json.dumps(structured, ensure_ascii=False), passed=passed)
             if d.get("verdict"):
                 m = VERDICT_RE.search(output)
                 if m and m.group(1).upper().startswith("SEND"):
@@ -490,6 +560,13 @@ class ProjectRunner:
         st.summary = one_line(text)
         s.add(ProjectMessage(project_id=pid, author_type="agent", agent_id=st.agent_id,
                              step_id=st.id, kind="result", text=text))
+        try:
+            refs = await registers.save(s, p, st, schema.public(structured))
+        except Exception as e:  # a register problem must not lose the step's work
+            log.exception("Register save failed for %s/%s", pid, st.step_key)
+            refs = [{"table": "error", "id": f"not saved: {e}"[:120]}]
+        if refs:
+            st.result_json = {**rj, "_saved": refs}
 
         # Rework coordinator: escalate when the round limit is passed.
         if st.step_key == (flow.get("rework") or {}).get("key") and (structured or {}).get("status") == "escalate_to_human":
@@ -499,8 +576,11 @@ class ProjectRunner:
 
         if not passed:
             fail_mode = d.get("on_fail", "send_back" if d.get("verdict") else "block")
-            reasons = ([structured.get("reasons")] if structured and structured.get("verdict") == "send_back"
-                       else _fail_reasons(structured or {}))
+            if structured and str(structured.get("verdict", "")).lower().replace(" ", "_") in ("send_back", "sendback", "fail"):
+                r = structured.get("reasons")
+                reasons = [str(x) for x in r] if isinstance(r, list) else [str(r)]
+            else:
+                reasons = _fail_reasons(structured or {})
             if fail_mode == "send_back" and d.get("send_back") and p.status not in ENDED_PROJECT_STATES:
                 st.status = "completed"
                 await self._send_back(s, p, st, d, flow, reasons)
@@ -521,6 +601,10 @@ class ProjectRunner:
             ))
             st.approval_id = req_id
             st.status = "needs_attention"  # waiting for a human decision
+            if st.step_key == "sweekriti":
+                ref = await registers.open_approval(s, p, req_id, schema.public(structured))
+                st.result_json = {**(st.result_json or {}),
+                                  "_saved": list((st.result_json or {}).get("_saved") or []) + [ref]}
             await s.commit()
             await notify("project", pid)
             await notify("workforce")
@@ -833,6 +917,10 @@ async def decide(pid: str, request_id: str, decision: str, note: str | None, use
         flow = get_flow(p.flow_key)
         d = step_def(flow, st.step_key) or {}
         ended = p.status in ENDED_PROJECT_STATES
+        try:
+            await registers.record_decision(s, p, request_id, decision)
+        except Exception:
+            log.exception("Could not record the decision in approval_workflows")
         if decision == "approve":
             st.status = "completed"
         elif decision == "approve_with_changes":

@@ -38,6 +38,7 @@ def _step_out(st: ProjectStep, names: dict, superseded: bool, flow: dict | None 
         "block": block, "block_label": BLOCKS.get(block), "mode": d.get("mode", "think"),
         "result": {k: v for k, v in (st.result_json or {}).items() if not k.startswith("_")} or None,
         "passed": (st.result_json or {}).get("_passed"),
+        "saved": (st.result_json or {}).get("_saved") or [],
         "id": st.id, "seq": st.seq, "step_key": st.step_key, "agent_id": st.agent_id,
         "agent_name": names.get(st.agent_id, {}).get("name", st.agent_id),
         "responsibility": st.responsibility, "tag": st.tag, "round": st.round,

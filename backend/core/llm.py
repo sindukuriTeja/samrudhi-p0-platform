@@ -39,6 +39,7 @@ async def generate(
     model: str | None = None,
     temperature: float = 0.3,
     timeout_s: float = 120.0,
+    format: str | None = None,
 ) -> LLMResult:
     """Call Ollama with the given prompt, serialized across all agents.
 
@@ -58,6 +59,9 @@ async def generate(
     }
     if system:
         payload["system"] = system
+    if format == "json":
+        # Ollama JSON mode: the model must return one valid JSON object.
+        payload["format"] = "json"
 
     start = time.monotonic()
     async with _llm_lock:  # serialize all LLM calls

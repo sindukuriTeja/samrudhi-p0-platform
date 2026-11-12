@@ -275,3 +275,5 @@ dialog p { margin: 0; }
   .convo, .composer, .proj-head { padding-left: 16px; padding-right: 16px; }
   .bubble { max-width: 92%; }
 }
+
+.acard .saved { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }

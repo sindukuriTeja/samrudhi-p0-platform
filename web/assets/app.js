@@ -470,6 +470,7 @@ async function viewProject(pid) {
           <div class="acard-head">${s.id ? stepSym(s, pendingIds) : SYM.completed()}<span class="name">${esc(m.agent_name || m.agent_id)}</span>
             <span class="tag">${esc(m.step_tag || 'Update')}${s.id ? esc(roundLabel(s)) : ''}</span><span class="faint small" style="margin-left:auto">${esc(time(m.created_at))}</span></div>
           <div class="body${long && !open ? ' clamp' : ''}">${esc(m.text)}</div>
+          ${s.saved && s.saved.length ? `<div class="saved">Saved to ${s.saved.map(r => `<span class="tag" title="${esc(r.table)}">${esc(r.table.replace(/_/g, ' '))} · ${esc(r.id)}</span>`).join(' ')}</div>` : ''}
           ${long ? `<button class="more" data-expand="${m.id}" aria-expanded="${open}">${open ? 'Show less' : 'Show more'}</button>` : ''}
         </article>`);
         for (const a of st.approvals.filter(a => a.step_id === m.step_id)) items.push(approvalCard(a, s, m));

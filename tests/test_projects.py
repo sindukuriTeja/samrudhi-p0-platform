@@ -93,24 +93,57 @@ def no_kick(monkeypatch):
     monkeypatch.setattr(R.runner, "kick", lambda *a, **k: None)
 
 
-def stub(monkeypatch, writer_text="Post 1: Eat well and walk daily. Ask your doctor about a sugar check.",
-         verdicts=None, seen=None):
-    """Replace model steps with fixed text. verdicts: {agent: [verdict line, ...]} consumed in order."""
+import json
+import re
+
+from backend.projects.flow import step_def
+
+TAG_TO_KEY = {s["tag"]: s["key"] for s in FLOW["steps"]}
+
+
+def _fill(spec, key, count, writer_text):
+    """Build an answer that matches a step's output schema (what a well-behaved model returns)."""
+    if isinstance(spec, dict):
+        return {k: _fill(v, k, count, writer_text) for k, v in spec.items()}
+    if isinstance(spec, list):
+        n = count if key in ("posts", "pieces", "briefs", "specs") and count else 1
+        return [_fill(spec[0], key, count, writer_text) for _ in range(n)]
+    if spec == "bool":
+        return True
+    if key == "caption":
+        return writer_text
+    return f"Plain words for {key}."
+
+
+def stub(monkeypatch, writer_text="Eat well and walk daily. Ask your doctor about a sugar check.",
+         verdicts=None, seen=None, broken=None):
+    """Replace model steps with schema-valid JSON.
+
+    verdicts: {agent: ["send_back: reasons", ...]} consumed in order (default pass).
+    broken:   {agent: n} -> the first n answers of that agent are not valid JSON.
+    """
     verdicts = {k: list(v) for k, v in (verdicts or {}).items()}
+    broken = dict(broken or {})
 
     async def fake_dispatch(args, kwargs, on_ref):
         await on_ref("test")
         agent, task = args[0], args[1]
         if seen is not None:
             seen.setdefault(agent, []).append((task, kwargs.get("context", {})))
-        if agent == "SAM-AG-082":
-            text = writer_text() if callable(writer_text) else writer_text
-        else:
-            text = f"{agent} finished its step. It is described in plain words here."
-        if "VERDICT" in task:
+        if broken.get(agent):
+            broken[agent] -= 1
+            return {"status": "completed", "execution_id": f"exec-test-{agent}", "output": "Sure! Here is my answer."}
+        d = step_def(FLOW, TAG_TO_KEY[kwargs["context"]["step"]])
+        m = re.search(r"must contain exactly (\d+) items", task)
+        text = writer_text() if callable(writer_text) else writer_text
+        data = _fill(d["output"], "", int(m.group(1)) if m else 0, text)
+        if d.get("verdict"):
             queue = verdicts.get(agent) or []
-            text += "\n" + (queue.pop(0) if queue else "VERDICT: PASS")
-        return {"status": "completed", "execution_id": f"exec-test-{agent}", "output": text}
+            v = queue.pop(0) if queue else "pass"
+            data["verdict"], _, reason = v.partition(":")
+            data["reasons"] = reason.strip() or "No problems found."
+        assert kwargs.get("output_format") == "json"
+        return {"status": "completed", "execution_id": f"exec-test-{agent}", "output": json.dumps(data)}
     monkeypatch.setattr(R.dispatcher, "dispatch", fake_dispatch)
 
 
@@ -184,8 +217,12 @@ async def test_full_chain_with_both_gates(monkeypatch, no_kick):
     assert [x["round"] for x in steps_of(st, "direction")] == [1, 2]
     assert [x["round"] for x in steps_of(st, "distribution")] == [1, 2]
     st = await run_until_blocked(pid)
-    disha_round2_task, _ = seen["SAM-AG-076"][-1]
+    disha_round2_task, disha_ctx = seen["SAM-AG-076"][-1]
     assert "Make the tone warmer." in disha_round2_task
+    # structured hand-over: Disha receives Shruti's whole brief record and Anvesh's research record
+    records = {h["step"]: h for h in disha_ctx["handed_over"]}
+    assert set(records["Client brief"]["record"]) == {"objective", "audience", "deliverables", "deadline", "limits"}
+    assert isinstance(records["Research"]["record"]["facts"], list)
 
     gate1b = st["pending_approval"]
     assert gate1b["agent_id"] == "SAM-AG-079"
@@ -234,7 +271,7 @@ async def test_claim_check_sends_work_back_and_stops_at_round_limit(monkeypatch,
 async def test_shuddhi_send_back_then_pass(monkeypatch, no_kick):
     await _ensure_agents("active")
     pid = await _new_project()
-    stub(monkeypatch, verdicts={"SAM-AG-080": ["VERDICT: SEND BACK - caption 2 claims too much"]})
+    stub(monkeypatch, verdicts={"SAM-AG-080": ["send_back: caption 2 claims too much"]})
     await R.start_project(pid, None, "tester")
     st = await run_until_blocked(pid)
     await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
@@ -296,3 +333,96 @@ async def test_activate_needed_uses_the_gate(no_kick):
     # every agent that passed the gate is now Active; any that failed is listed with a reason
     assert {f["canonical_id"] for f in result["failed"]} == {a["canonical_id"] for a in ready["not_active"]}
     await _ensure_agents("active")
+
+
+async def test_wrong_structure_is_asked_again_then_accepted(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch, broken={"SAM-AG-001": 1})
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    kick = steps_of(st, "kickoff")
+    assert len(kick) == 1 and kick[0]["status"] == "completed"
+    assert set(kick[0]["result"]) >= {"goal", "priority", "deadline", "owners", "risks"}
+    assert any(m["kind"] == "format" for m in st["messages"])     # the "asking again" note
+
+
+async def test_wrong_structure_twice_stops_the_step(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch, broken={"SAM-AG-001": 2})
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    kick = steps_of(st, "kickoff")[0]
+    assert kick["status"] == "needs_attention" and "required structure" in kick["error"]
+
+
+async def test_wrong_number_of_posts_is_rejected(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch)
+    await R.start_project(pid, "Make 2 posts.", "tester")
+    st = await run_until_blocked(pid)                          # Gate 1
+    from backend.projects.schema import validate
+    cal = steps_of(st, "calendar")[0]["result"]
+    assert len(cal["posts"]) == 2 and not validate(cal, step_def(FLOW, "calendar")["output"])
+
+
+async def test_completed_project_is_saved_to_the_registers(monkeypatch, no_kick):
+    from backend.models import (Action, Allocation, ApprovalWorkflow, Brief, ClientCommunication,
+                                ContentCalendar, ContentPackage, ContentStrategy, Initiative, QaReview,
+                                Report, WorkPackage, WorkflowInstance)
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch)
+    await R.start_project(pid, "Create 3 posts for World Diabetes Day.", "tester")
+    st = await run_until_blocked(pid)
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    st = await run_until_blocked(pid)
+    gate2 = st["pending_approval"]
+    await R.decide(pid, gate2["request_id"], "approve", None, "tester")
+    st = await run_until_blocked(pid)
+    assert st["project"]["status"] == "completed"
+
+    async with async_session_maker() as s:
+        one = lambda q: s.execute(q)
+        wf = (await one(select(WorkflowInstance).where(WorkflowInstance.workflow_id == pid))).scalars().first()
+        assert wf.status == "delivered"
+        assert [x["to"] for x in wf.stages] == ["planning", "allocated", "executing", "quality", "approved", "delivered"]
+        assert (await one(select(Initiative).where(Initiative.objective_ref == pid))).scalars().first().milestones
+        wps = (await one(select(WorkPackage).where(WorkPackage.workflow_id == wf.id))).scalars().all()
+        assert len(wps) == 3 and all(w.deadline and w.assigned_agent == "SAM-AG-082" for w in wps)
+        allocs = (await one(select(Allocation).where(Allocation.decision_ref == pid))).scalars().all()
+        assert len(allocs) == 9                                      # 3 packages x Lekha, Roop, Chitra
+        assert (await one(select(ContentStrategy).where(ContentStrategy.strategy_id == f"STR-{pid}-R1"))).scalars().first()
+        cal = (await one(select(ContentCalendar).where(ContentCalendar.calendar_id == f"CAL-{pid}-R1"))).scalars().first()
+        assert len(cal.items) == 3
+        pkgs = (await one(select(ContentPackage).where(ContentPackage.package_id.like(f"CP-{pid}-%")))).scalars().all()
+        assert len(pkgs) == 3 and {p.status for p in pkgs} == {"scheduled"}
+        reviews = (await one(select(QaReview).where(QaReview.package_id.in_([p.id for p in pkgs])))).scalars().all()
+        assert {r.reviewer for r in reviews} == {"SAM-AG-080", "SAM-AG-094", "SAM-AG-183", "SAM-AG-186", "SAM-AG-187"}
+        aw = (await one(select(ApprovalWorkflow).where(ApprovalWorkflow.approval_id == gate2["request_id"]))).scalars().first()
+        assert aw.status == "approved"
+        assert (await one(select(ClientCommunication).where(ClientCommunication.comm_id == f"COM-{pid}-R1"))).scalars().first()
+        rpt = (await one(select(Report).where(Report.report_id == f"RPT-{pid}-R1"))).scalars().first()
+        assert rpt and rpt.source_trace
+        acts = (await one(select(Action).where(Action.task.like(f"[{pid}]%")))).scalars().all()
+        assert acts and {a.status for a in acts} == {"closed"}
+        briefs = (await one(select(Brief).where(Brief.brief_type == "project"))).scalars().all()
+        assert any(b.content.get("project_id") == pid for b in briefs)
+    saved = {r["table"] for x in st["steps"] for r in x["saved"]}
+    assert {"initiatives", "workflow_instances", "work_packages", "allocations", "content_strategies",
+            "content_calendars", "content_packages", "qa_reviews", "approval_workflows",
+            "client_communications", "reports", "briefs", "actions"} <= saved
+
+
+async def test_research_is_never_marked_verified_without_a_source(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch)                                    # the stub model claims verified: true
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    research = steps_of(st, "research")[0]["result"]
+    assert research["facts"] and all(f["verified"] is False for f in research["facts"])
+    msg = next(m for m in st["messages"] if m["step_tag"] == "Research")
+    assert msg["text"].startswith("No live source connector")

@@ -131,6 +131,16 @@ Sweekriti), publishing, measurement and close (Arjun's final brief).
   screen can run the existing activation gate for all missing agents in one click (signed-in
   founder or assurance lead); agents that fail the gate stay inactive.
 
+Structured outputs: every model step returns one JSON object in the shape given by its
+`output` schema in the flow file (Ollama JSON mode). The runner validates it in code (fields,
+types, one item per post), asks the agent once more with the exact problems if it is wrong, and
+stops the step after a second failure. The next agents receive the whole structured record, the
+code checks read the posts' text from it, and values the model must not decide are set in code
+(research facts stay "not verified" until a live source connector exists). Each record is also
+saved to the agent's register: initiatives, actions, workflow_instances (Daksh's state machine
+from planning to delivered), work_packages, allocations, content_strategies, content_calendars,
+content_packages, qa_reviews, approval_workflows, client_communications, reports and briefs.
+
 New tables (Alembic migration `migrations/versions/0001_project_tables.py`):
 `projects`, `project_messages`, `project_steps`, `approval_decisions`;
 migration `0002_step_result_json.py` adds `project_steps.result_json`.
