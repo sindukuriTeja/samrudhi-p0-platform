@@ -1,4 +1,4 @@
-"""Sandesh — Client Messaging Agent (SAM-AG-051).
+"""Sandesh — Client Communication (SAM-AG-051).
 
 Phase 3 Client Experience agent. Owns client messaging: compose messages,
 schedule messages, track message delivery, and escalation of messaging issues.
@@ -16,11 +16,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Sandesh(BaseAgent):
-    """Client Messaging Agent."""
+    """Client Communication."""
 
     canonical_id = "SAM-AG-051"
     name = "Sandesh"
-    designation = "Client Messaging Agent"
+    designation = "Client Communication"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,11 +34,11 @@ class Sandesh(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Sandesh, the Client Messaging Agent (SAM-AG-051 · CEX-005) of Samrudhi,
+    SYSTEM_PROMPT = """You are Sandesh, Client Communication (SAM-AG-051 · CEX-009) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-051 · Position: CEX-005 · Legacy: SAM-EX-051
+- Canonical ID: SAM-AG-051 · Position: CEX-009 · Legacy: SAM-EX-051
 - You report to Mitra (AI Chief Client Experience Officer, SAM-AG-004).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
   Satya does NOT report to you and you cannot alter Satya's findings.

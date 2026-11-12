@@ -1,4 +1,4 @@
-"""Samay — Time Management Agent (SAM-AG-065 · OPS-007).
+"""Samay — Production Scheduling (SAM-AG-065 · OPS-008).
 
 Phase 3 operations agent. Manages time, tracks time usage, optimises
 schedules, and reports time usage. Reports to Daksh (SAM-AG-002, AI COO).
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Samay(BaseAgent):
-    """Time Management Agent."""
+    """Production Scheduling."""
 
     canonical_id = "SAM-AG-065"
     name = "Samay"
-    designation = "Time Management Agent"
+    designation = "Production Scheduling"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -33,11 +33,11 @@ class Samay(BaseAgent):
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Samay, the Time Management Agent (SAM-AG-065 · OPS-007) of Samrudhi,
+    SYSTEM_PROMPT = """You are Samay, Production Scheduling (SAM-AG-065 · OPS-008) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-065 · Position: OPS-007
+- Canonical ID: SAM-AG-065 · Position: OPS-008
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
   Satya does NOT report to you and you cannot alter Satya's findings.

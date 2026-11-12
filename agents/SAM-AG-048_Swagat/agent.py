@@ -1,8 +1,12 @@
-"""Swagat — Client Welcome Agent (SAM-AG-048).
+"""Swagat — Client Onboarding (SAM-AG-048 · CEX-006).
 
-Phase 3 Client Experience agent. Owns client welcome: welcome messages,
-tracking welcome status, reporting welcome metrics, and escalation of welcome
-issues. Reports to Mitra (SAM-AG-004).
+Stage 2 Phase 3 operations, client, analytics and CEO-office agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Onboard new clients: run the onboarding checklist, collect documents and assets, create
+the client master profile with Smriti, and confirm kickoff readiness. Steps in only when
+the client is new. [PDF 01A.04 · CEX-006 Client Onboarding; processes CEX-P02, CEX-P03,
+CEX-P06]
+Reports to Mitra (AI CXO, SAM-AG-004).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -14,59 +18,71 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Swagat(BaseAgent):
-    """Client Welcome Agent."""
+    """Client Onboarding."""
 
     canonical_id = "SAM-AG-048"
     name = "Swagat"
-    designation = "Client Welcome Agent"
+    designation = "Client Onboarding"
     agent_type = "thinking"
 
     AUTHORITY = {
-        "cex.welcome_client": True,
-        "cex.send_welcome_message": True,
-        "cex.track_welcome": True,
-        "cex.report_welcome_status": True,
-        "cex.escalate_welcome_issue": True,
-        "tec.grant_access": False,
+        "cex.start_onboarding": True,
+        "cex.collect_document": True,
+        "cex.create_client_profile": True,
+        "cex.confirm_kickoff": True,
+        "cex.escalate_onboarding_gap": True,
         "gov.certify": False,
         "gov.modify_finding": False,
+        "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Swagat, the Client Welcome Agent (SAM-AG-048 · CEX-004) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "start_onboarding_checklist": "cex.start_onboarding",
+        "collect_document": "cex.collect_document",
+        "create_client_profile": "cex.create_client_profile",
+        "confirm_kickoff_readiness": "cex.confirm_kickoff",
+        "escalate_onboarding_gap": "cex.escalate_onboarding_gap",
+    }
+
+    SYSTEM_PROMPT = """You are Swagat, Client Onboarding (SAM-AG-048 · CEX-006) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-048 · Position: CEX-004 · Legacy: SAM-EX-048
-- You report to Mitra (AI Chief Client Experience Officer, SAM-AG-004).
+- Canonical ID: SAM-AG-048 · Position: CEX-006 · Department: Client Experience & Account Management
+- You report to Mitra (AI CXO, SAM-AG-004).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
-  Satya does NOT report to you and you cannot alter Satya's findings.
 
 YOUR MISSION
-Own client welcome experience: send welcome messages, track welcome status,
-report welcome metrics, and escalate welcome issues. Every welcome must be
-personalised, timely and warm. Never fabricate welcome records or metrics.
+Onboard new clients: run the onboarding checklist, collect documents and assets, create the
+client master profile with Smriti, and confirm kickoff readiness. Steps in only when the client
+is new. [PDF 01A.04 · CEX-006 Client Onboarding; processes CEX-P02, CEX-P03, CEX-P06]
 
-YOUR FIVE REGISTERS
-1. Welcome Register — welcome status, personalization, timing per client
-2. Welcome Message Register — messages sent, channels, content
-3. Welcome Tracking Register — delivery, acknowledgment, engagement
-4. Welcome Report Register — metrics, satisfaction, completion rates
-5. Welcome Escalation Register — failed welcomes, escalations
+YOUR REGISTERS
+1. Onboarding Checklist Register — client, item, owner, status
+2. Document Collection Register — document, received, validated
+3. Kickoff Readiness Register — client, readiness checks, date
+
+AUTHORITY MATRIX
+cex.start_onboarding · cex.collect_document · cex.create_client_profile · cex.confirm_kickoff · cex.escalate_onboarding_gap
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never fabricate welcome records or engagement metrics. Missing = "unavailable".
-2. Never send welcome messages outside approved branding — route to human.
-3. Never suppress a failed welcome to improve your score.
-4. Respect tenant isolation — never cross-client welcome leakage.
-5. Satya's findings are immutable to you — read-only.
-6. Every welcome has a timestamp and delivery record.
-7. If the local model is down, report it honestly — do not fake output."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Never mark onboarding complete while a required document is missing.
+5. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "welcome")
+        action = kwargs.get("action", "onboard")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -89,7 +105,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="cex.welcome",
+                event_type="cex.onboarding",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -104,129 +120,77 @@ HARD RULES — NEVER VIOLATE
     # Swagat's tools (authority-guarded)
     # ------------------------------------------------------------------
 
-    @authority_guard("cex.welcome_client")
-    def welcome_client(
-        self,
-        client_id: str,
-        welcome_type: str,
-        personalization: dict,
-    ) -> dict:
-        """Initiate welcome process for a new client."""
-        welcome_id = f"WLC-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("cex.start_onboarding")
+    def start_onboarding_checklist(self, client_id: str, items: list) -> dict:
+        """Start the onboarding checklist."""
         return {
-            "welcome_id": welcome_id,
+            "record_id": f"SWA-{uuid.uuid4().hex[:6].upper()}",
             "client_id": client_id,
-            "welcome_type": welcome_type,
-            "personalization": personalization,
-            "status": "initiated",
-            "initiated_at": datetime.now(timezone.utc).isoformat(),
+            "items": items,
+            "action": "start_onboarding_checklist",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("cex.send_welcome_message")
-    def send_welcome_message(
-        self,
-        client_id: str,
-        channel: str,
-        message: str,
-        attachments: list | None = None,
-    ) -> dict:
-        """Send a welcome message to a client."""
-        message_id = f"MSG-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("cex.collect_document")
+    def collect_document(self, client_id: str, document: str) -> dict:
+        """Record a collected document."""
         return {
-            "message_id": message_id,
+            "record_id": f"SWA-{uuid.uuid4().hex[:6].upper()}",
             "client_id": client_id,
-            "channel": channel,
-            "message": message,
-            "attachments": attachments or [],
-            "status": "sent",
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "document": document,
+            "action": "collect_document",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("cex.track_welcome")
-    def track_welcome(
-        self,
-        welcome_id: str,
-    ) -> dict:
-        """Track welcome status for a client."""
+    @authority_guard("cex.create_client_profile")
+    def create_client_profile(self, client_id: str, profile: dict) -> dict:
+        """Create the client master profile."""
         return {
-            "welcome_id": welcome_id,
-            "stage": "unknown",
-            "completion": 0.0,
-            "acknowledged": False,
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    @authority_guard("cex.report_welcome_status")
-    def report_welcome_status(
-        self,
-        period: str,
-        welcomed_clients: list,
-        pending_welcomes: list,
-    ) -> dict:
-        """Generate welcome status report."""
-        report_id = f"RPT-{uuid.uuid4().hex[:6].upper()}"
-        return {
-            "report_id": report_id,
-            "period": period,
-            "welcomed_clients": len(welcomed_clients),
-            "pending_welcomes": len(pending_welcomes),
-            "completion_rate": "0%",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    @authority_guard("cex.escalate_welcome_issue")
-    def escalate_welcome_issue(
-        self,
-        client_id: str,
-        severity: str,
-        description: str,
-        failed_steps: list,
-    ) -> dict:
-        """Escalate a welcome issue to human."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
-        return {
-            "incident_id": incident_id,
+            "record_id": f"SWA-{uuid.uuid4().hex[:6].upper()}",
             "client_id": client_id,
-            "severity": severity,
-            "description": description,
-            "failed_steps": failed_steps,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
+            "profile": profile,
+            "action": "create_client_profile",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    def list_welcomes(
-        self,
-        client_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List welcome records (read-only)."""
+    @authority_guard("cex.confirm_kickoff")
+    def confirm_kickoff_readiness(self, client_id: str, checks: dict) -> dict:
+        """Confirm kickoff readiness."""
         return {
-            "welcomes": [],
+            "record_id": f"SWA-{uuid.uuid4().hex[:6].upper()}",
+            "client_id": client_id,
+            "checks": checks,
+            "action": "confirm_kickoff_readiness",
+            "status": "recorded",
+            "recorded_at": _now(),
+        }
+
+    @authority_guard("cex.escalate_onboarding_gap")
+    def escalate_onboarding_gap(self, client_id: str, gap: str) -> dict:
+        """Escalate an onboarding gap."""
+        return {
+            "record_id": f"SWA-{uuid.uuid4().hex[:6].upper()}",
+            "client_id": client_id,
+            "gap": gap,
+            "action": "escalate_onboarding_gap",
+            "status": "recorded",
+            "recorded_at": _now(),
+        }
+
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
+
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
+        return {
+            "records": [],
             "count": 0,
-            "filter": {"client_id": client_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_welcome_status(
-        self,
-        client_id: str,
-    ) -> dict:
-        """Get welcome status for a client (read-only)."""
-        return {
-            "client_id": client_id,
-            "welcome": {},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_welcome_metrics(
-        self,
-        period: str | None = None,
-    ) -> dict:
-        """Get welcome metrics (read-only)."""
-        return {
-            "period": period,
-            "metrics": {},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -241,5 +205,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

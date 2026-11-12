@@ -1,4 +1,4 @@
-"""Pariksha — Content Review Agent (SAM-AG-094).
+"""Pariksha — Platform & Technical Content QA (SAM-AG-094).
 
 Phase 2 content pilot agent. Owns technical content review under Aarya:
 performs technical QA, fact-checking, and content accuracy reviews.
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Pariksha(BaseAgent):
-    """Content Review Agent."""
+    """Platform & Technical Content QA."""
 
     canonical_id = "SAM-AG-094"
     name = "Pariksha"
-    designation = "Content Review Agent"
+    designation = "Platform & Technical Content QA"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -33,11 +33,11 @@ class Pariksha(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Pariksha, the Content Review Agent (SAM-AG-094 · CRT-026) of Samrudhi,
+    SYSTEM_PROMPT = """You are Pariksha, Platform & Technical Content QA (SAM-AG-094 · CRT-020) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-094 · Position: CRT-026
+- Canonical ID: SAM-AG-094 · Position: CRT-020
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 

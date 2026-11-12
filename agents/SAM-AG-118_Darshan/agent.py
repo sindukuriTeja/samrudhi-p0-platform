@@ -1,4 +1,4 @@
-"""Darshan — BI & Reporting Agent (SAM-AG-118).
+"""Darshan — BI & Reporting Lead (SAM-AG-118).
 
 Phase 3 analytics/data agent. Owns business intelligence and reporting:
 generates BI reports, schedules reports, publishes reports, and escalates
@@ -16,11 +16,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Darshan(BaseAgent):
-    """BI & Reporting Agent."""
+    """BI & Reporting Lead."""
 
     canonical_id = "SAM-AG-118"
     name = "Darshan"
-    designation = "BI & Reporting Agent"
+    designation = "BI & Reporting Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,7 +34,7 @@ class Darshan(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Darshan, the BI & Reporting Agent (SAM-AG-118 · DAT-004) of Samrudhi,
+    SYSTEM_PROMPT = """You are Darshan, BI & Reporting Lead (SAM-AG-118 · DAT-004) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY

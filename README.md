@@ -28,7 +28,9 @@ Production-grade, locally-run agentic AI platform. All agents run on **Ollama** 
 ```
 samrudhi-p0/
 ├── config/
-│   └── settings.py              # env-based config (pydantic-settings)
+│   ├── settings.py              # env-based config (pydantic-settings)
+│   ├── agent_registry.yaml      # canonical registry of the 79 built agents (PDF Document 01C)
+│   └── project_flows.yaml       # project flow used by the Control Room runner
 ├── backend/
 │   ├── main.py                  # FastAPI app + startup/shutdown
 │   ├── database.py              # async SQLAlchemy engine + session
@@ -52,40 +54,8 @@ samrudhi-p0/
 │   └── tasks.py                 # run_agent_task dispatcher
 ├── agents/
 │   ├── base.py                  # BaseAgent + dynamic registry loader
-│   ├── SAM-AG-001_Arjun/        # AI CEO (Stage 1A)
-│   ├── SAM-AG-002_Daksh/        # AI COO — Delivery Orchestrator (Phase 1)
-│   ├── SAM-AG-003_Aarya/        # AI CCO — Creative/Content (Phase 1)
-│   ├── SAM-AG-004_Mitra/        # AI CXO — Client Experience (Phase 1)
-│   ├── SAM-AG-007_Sutra/        # AI CTO (Stage 1A)
-│   ├── SAM-AG-009_Medha/        # AI Head of Intelligence (Phase 1)
-│   ├── SAM-AG-010_Satya/        # Chief Assurance Agent (Stage 1A)
-│   ├── SAM-AG-011_Prakash/      # Compliance verification (Stage 1C)
-│   ├── SAM-AG-012_Rajat/        # Risk assessment (Stage 1C)
-│   ├── SAM-AG-013_Niti/         # Policy governance (Stage 1C)
-│   ├── SAM-AG-014_Satark/       # Security review (Stage 1C)
-│   ├── SAM-AG-015_Sachit/       # Evidence management (Stage 1C)
-│   ├── SAM-AG-016_Pramaan/      # Certification (Stage 1C)
-│   ├── SAM-AG-017_Aarogya/      # Quality assurance (Stage 1C)
-│   ├── SAM-AG-018_Samay/        # SLA monitoring (Stage 1C)
-│   ├── SAM-AG-019_Sabhyata/     # Audit trail (Stage 1C)
-│   ├── SAM-AG-020_Ansh/         # Incident response (Stage 1C)
-│   ├── SAM-AG-021_Benchmark/    # Benchmarking (Stage 1C)
-│   ├── SAM-AG-022_Satark2/      # Anomaly detection (Stage 1C)
-│   ├── SAM-AG-153_Vinyas/       # Platform architecture service (Stage 1B)
-│   ├── SAM-AG-154_Setubandh/    # MCP connector service (Stage 1B)
-│   ├── SAM-AG-155_Yantra/       # Runtime orchestration service (Stage 1B)
-│   ├── SAM-AG-156_Smaran/       # Context/memory service (Stage 1B)
-│   ├── SAM-AG-157_Suraksha/     # Security enforcement service (Stage 1B)
-│   ├── SAM-AG-158_Niyantrak/    # AgentOps & DWMS Lead (Stage 1A)
-│   ├── SAM-AG-159_Pehchaan/     # Identity registry service (Stage 1B)
-│   ├── SAM-AG-160_Jod/          # Integration connector service (Stage 1B)
-│   ├── SAM-AG-161_Adhikar/      # Permission/access service (Stage 1B)
-│   ├── SAM-AG-162_Pravahika/    # Workflow orchestration service (Stage 1B)
-│   ├── SAM-AG-163_Sandarbhika/  # Context retrieval service (Stage 1B)
-│   ├── SAM-AG-166_Nirikshak/    # Telemetry/monitoring service (Stage 1B)
-│   ├── SAM-AG-167_Parikshak/    # Testing/QA service (Stage 1B)
-│   ├── SAM-AG-168_Sanskaran/    # Version control service (Stage 1B)
-│   └── SAM-AG-170_Chaukidar/    # Security monitoring service (Stage 1B)
+│   ├── SAM-AG-<id>_<Name>/      # 79 agents: one folder per canonical ID
+│   │                            # IDs, positions, titles and managers: config/agent_registry.yaml
 ├── tests/
 │   ├── conftest.py              # SQLite test DB setup
 │   ├── test_authority.py        # authority guard tests
@@ -165,9 +135,9 @@ New tables (Alembic migration `migrations/versions/0001_project_tables.py`):
 - **Phase 0 (Platform):** ✅ Complete — DB models, message bus, authority guard, auth, LLM queue, lifecycle gate, FastAPI, Celery.
 - **Stage 1A (Core agents):** ✅ Complete — Arjun, Sutra, Satya, Niyantrak.
 - **Stage 1B (Technology services):** ✅ Complete — 14 service-first agents (Vinyas, Setubandh, Yantra, Smaran, Suraksha, Pehchaan, Jod, Adhikar, Pravahika, Sandarbhika, Nirikshak, Parikshak, Sanskaran, Chaukidar). All enforce authority guard; graceful model-unavailable handling.
-- **Stage 1C (Assurance agents):** ✅ Complete — 12 thinking agents under Satya (Prakash, Rajat, Niti, Satark, Sachit, Pramaan, Aarogya, Samay, Sabhyata, Ansh, Benchmark, Satark2). Full assurance spectrum: compliance, risk, policy, security, evidence, certification, quality, SLA, audit, incidents, benchmarking, anomaly detection.
+- **Stage 1C (Assurance agents):** 12 agents under Satya, as in the PDF registry: Pramana, Nishtha, Maryada, Seema, Gopniya, Sakshi, Sankat (service-first, no model) and Yogyata, Pramanik, Gunvatta, Nishpaksh, Swasthya (role agents that judge but never produce). Swasthya blocks high-risk health claims in code; Gopniya flags personal and other-client data; Pramanik recommends but cannot certify.
 - **Phase 1 (P1 Pilot Leadership):** ✅ Complete — 4 executive agents (Daksh COO, Aarya CCO, Mitra CXO, Medha Intelligence). Each has 13 authority-guarded tools, 5 registers (20 new DB tables), workflow state machines, and full I/O contracts. Build order: Daksh → Aarya → Mitra → Medha.
-- **Total tests:** 86 passing.
+- **Registry:** `config/agent_registry.yaml` is the single source of truth for every agent's ID, position, title, department and manager, taken from the PDF canonical registry. `python -m scripts.seed_agents` reconciles the database with it, and `tests/test_registry.py` fails if the code drifts from it.
 
 ## Next Steps (per build plan)
 

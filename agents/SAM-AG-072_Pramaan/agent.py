@@ -1,7 +1,11 @@
-"""Pramaan — Process Standards Agent (SAM-AG-072 · OPS-013).
+"""Pramaan — Delivery Acceptance (SAM-AG-072 · OPS-015).
 
-Phase 3 operations agent. Sets process standards, enforces standards, audits
-processes, and reports standards compliance. Reports to Daksh (SAM-AG-002, AI COO).
+Stage 2 Phase 3 operations, client, analytics and CEO-office agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Confirm delivery readiness: verify that every required check and approval is present
+before release, and refuse release when anything is missing. [PDF 01A.05 · OPS-015
+Delivery Readiness & Acceptance; processes OPS-P21, OPS-P22]
+Reports to Daksh (AI COO, SAM-AG-002).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -13,63 +17,72 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Pramaan(BaseAgent):
-    """Process Standards Agent."""
+    """Delivery Acceptance."""
 
     canonical_id = "SAM-AG-072"
     name = "Pramaan"
-    designation = "Process Standards Agent"
+    designation = "Delivery Acceptance"
     agent_type = "thinking"
+    REQUIRED_CHECKS = ("shuddhi", "pariksha", "gunvatta", "swasthya", "gopniya")
 
     AUTHORITY = {
-        "ops.set_process_standards": True,
-        "ops.enforce_standards": True,
-        "ops.audit_process": True,
-        "ops.report_standards": True,
-        "ops.escalate_standards_issue": True,
+        "ops.verify_acceptance": True,
+        "ops.confirm_release_readiness": True,
+        "ops.record_acceptance_criteria": True,
+        "ops.refuse_release": True,
+        "ops.escalate_missing_approval": True,
         "gov.certify": False,
         "gov.modify_finding": False,
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Pramaan, the Process Standards Agent (SAM-AG-072 · OPS-013) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "verify_acceptance": "ops.verify_acceptance",
+        "confirm_release_readiness": "ops.confirm_release_readiness",
+        "record_acceptance_criteria": "ops.record_acceptance_criteria",
+        "refuse_release": "ops.refuse_release",
+        "escalate_missing_approval": "ops.escalate_missing_approval",
+    }
+
+    SYSTEM_PROMPT = """You are Pramaan, Delivery Acceptance (SAM-AG-072 · OPS-015) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-072 · Position: OPS-013
+- Canonical ID: SAM-AG-072 · Position: OPS-015 · Department: Operations & Delivery Management
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
-  Satya does NOT report to you and you cannot alter Satya's findings.
 
 YOUR MISSION
-Set process standards, enforce standards, audit processes for compliance, and
-report standards compliance. Every standard has traceable definition and version.
+Confirm delivery readiness: verify that every required check and approval is present before
+release, and refuse release when anything is missing. [PDF 01A.05 · OPS-015 Delivery Readiness &
+Acceptance; processes OPS-P21, OPS-P22]
 
 YOUR REGISTERS
-1. Process Standards Register — standards, definitions, versions
-2. Standards Enforcement Register — enforcement actions, results
-3. Process Audit Register — audits, findings, compliance status
-4. Standards Report Register — reports, periods, summaries
-5. Standards Issue Register — issues, escalations, resolutions
+1. Acceptance Register — item, checks, result, verifier
+2. Release Readiness Register — item, ready, date
 
 AUTHORITY MATRIX
-ops.set_process_standards · ops.enforce_standards · ops.audit_process
-ops.report_standards · ops.escalate_standards_issue · gov.certify=False
-gov.modify_finding=False · tec.grant_access=False
+ops.verify_acceptance · ops.confirm_release_readiness · ops.record_acceptance_criteria · ops.refuse_release · ops.escalate_missing_approval
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never fabricate standards compliance data — missing data = "unavailable".
-2. Never suppress a standards violation or downgrade a compliance finding.
-3. Never change commercial terms — route to human.
-4. Respect tenant isolation — never cross-tenant data leakage.
-5. Satya's findings are immutable to you — read-only.
-6. Every standard has a version and audit trail.
-7. If the local model is down, report it honestly — do not fake output."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Never confirm readiness while a required check is missing.
+5. Nirikshan coordinates quality; you do not replace independent assurance.
+6. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "set_standards")
+        action = kwargs.get("action", "verify")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -92,7 +105,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="ops.standards",
+                event_type="ops.acceptance",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -103,132 +116,81 @@ HARD RULES — NEVER VIOLATE
             pass
         return AgentResult(text=text, agent_id=self.canonical_id, tokens_used=tokens, status="completed")
 
-    @authority_guard("ops.set_process_standards")
-    def set_process_standards(
-        self,
-        process_id: str,
-        standards: list,
-        version: str,
-    ) -> dict:
-        """Set process standards with version."""
-        standard_id = f"STD-{uuid.uuid4().hex[:6].upper()}"
+    # ------------------------------------------------------------------
+    # Pramaan's tools (authority-guarded)
+    # ------------------------------------------------------------------
+
+    @authority_guard("ops.verify_acceptance")
+    def verify_acceptance(self, item_ref: str, checks: dict) -> dict:
+        """Verify every required check is present."""
+        missing = [c for c in self.REQUIRED_CHECKS if not (checks or {}).get(c)]
         return {
-            "standard_id": standard_id,
-            "process_id": process_id,
-            "standards": standards,
-            "version": version,
-            "status": "set",
-            "set_at": datetime.now(timezone.utc).isoformat(),
+            "item_ref": item_ref,
+            "checks": checks,
+            "missing_checks": missing,
+            "accepted": not missing,
+            "status": "ready" if not missing else "refused_missing_check",
+            "verified_at": _now(),
         }
 
-    @authority_guard("ops.enforce_standards")
-    def enforce_standards(
-        self,
-        process_id: str,
-        standard_ids: list,
-    ) -> dict:
-        """Enforce standards on a process."""
-        enforcement_id = f"ENF-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.confirm_release_readiness")
+    def confirm_release_readiness(self, item_ref: str) -> dict:
+        """Confirm release readiness."""
         return {
-            "enforcement_id": enforcement_id,
-            "process_id": process_id,
-            "standard_ids": standard_ids,
-            "compliance": {sid: "compliant" for sid in standard_ids},
-            "status": "enforced",
-            "enforced_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PRA-{uuid.uuid4().hex[:6].upper()}",
+            "item_ref": item_ref,
+            "action": "confirm_release_readiness",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.audit_process")
-    def audit_process(
-        self,
-        process_id: str,
-        audit_scope: list,
-    ) -> dict:
-        """Audit a process for standards compliance."""
-        audit_id = f"AUD-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.record_acceptance_criteria")
+    def record_acceptance_criteria(self, item_ref: str, criteria: list) -> dict:
+        """Record acceptance criteria."""
         return {
-            "audit_id": audit_id,
-            "process_id": process_id,
-            "audit_scope": audit_scope,
-            "findings": [],
-            "compliance_rate": 1.0,
-            "status": "audited",
-            "audited_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PRA-{uuid.uuid4().hex[:6].upper()}",
+            "item_ref": item_ref,
+            "criteria": criteria,
+            "action": "record_acceptance_criteria",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.report_standards")
-    def report_standards(
-        self,
-        period: str,
-        process_ids: list,
-        summary: dict,
-    ) -> dict:
-        """Generate a standards compliance report for a period."""
-        report_id = f"RPT-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.refuse_release")
+    def refuse_release(self, item_ref: str, reason: str) -> dict:
+        """Refuse a release."""
         return {
-            "report_id": report_id,
-            "period": period,
-            "process_ids": process_ids,
-            "summary": summary,
-            "status": "generated",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PRA-{uuid.uuid4().hex[:6].upper()}",
+            "item_ref": item_ref,
+            "reason": reason,
+            "action": "refuse_release",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.escalate_standards_issue")
-    def escalate_standards_issue(
-        self,
-        issue_type: str,
-        description: str,
-        severity: str,
-        affected_processes: list,
-    ) -> dict:
-        """Escalate a standards issue to human Board."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.escalate_missing_approval")
+    def escalate_missing_approval(self, item_ref: str, missing: list) -> dict:
+        """Escalate a missing approval."""
         return {
-            "incident_id": incident_id,
-            "issue_type": issue_type,
-            "description": description,
-            "severity": severity,
-            "affected_processes": affected_processes,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PRA-{uuid.uuid4().hex[:6].upper()}",
+            "item_ref": item_ref,
+            "missing": missing,
+            "action": "escalate_missing_approval",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    def list_standards(
-        self,
-        process_id: str | None = None,
-        version: str | None = None,
-    ) -> dict:
-        """List process standards (read-only)."""
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
+
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
         return {
-            "standards": [],
+            "records": [],
             "count": 0,
-            "filter": {"process_id": process_id, "version": version},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_audit_results(
-        self,
-        process_id: str | None = None,
-    ) -> dict:
-        """Get audit results (read-only)."""
-        return {
-            "audits": [],
-            "count": 0,
-            "filter": {"process_id": process_id},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_compliance_status(
-        self,
-        process_id: str | None = None,
-    ) -> dict:
-        """Get compliance status (read-only)."""
-        return {
-            "processes": [],
-            "count": 0,
-            "filter": {"process_id": process_id},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -243,5 +205,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

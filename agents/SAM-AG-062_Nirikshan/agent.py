@@ -1,4 +1,4 @@
-"""Nirikshan — Work Monitoring Agent (SAM-AG-062 · OPS-005).
+"""Nirikshan — Delivery Control Lead (SAM-AG-062 · OPS-005).
 
 Phase 3 operations agent. Monitors work, checks progress, reports status,
 and detects deviations. Reports to Daksh (SAM-AG-002, AI COO).
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Nirikshan(BaseAgent):
-    """Work Monitoring Agent."""
+    """Delivery Control Lead."""
 
     canonical_id = "SAM-AG-062"
     name = "Nirikshan"
-    designation = "Work Monitoring Agent"
+    designation = "Delivery Control Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -33,7 +33,7 @@ class Nirikshan(BaseAgent):
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Nirikshan, the Work Monitoring Agent (SAM-AG-062 · OPS-005) of Samrudhi,
+    SYSTEM_PROMPT = """You are Nirikshan, Delivery Control Lead (SAM-AG-062 · OPS-005) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY

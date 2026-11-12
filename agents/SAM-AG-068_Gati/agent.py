@@ -1,4 +1,4 @@
-"""Gati — Delivery Speed Agent (SAM-AG-068 · OPS-010).
+"""Gati — Workflow Progress (SAM-AG-068 · OPS-011).
 
 Phase 3 operations agent. Tracks delivery speed, measures latency, optimises
 speed, and reports speed metrics. Reports to Daksh (SAM-AG-002, AI COO).
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Gati(BaseAgent):
-    """Delivery Speed Agent."""
+    """Workflow Progress."""
 
     canonical_id = "SAM-AG-068"
     name = "Gati"
-    designation = "Delivery Speed Agent"
+    designation = "Workflow Progress"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -33,11 +33,11 @@ class Gati(BaseAgent):
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Gati, the Delivery Speed Agent (SAM-AG-068 · OPS-010) of Samrudhi,
+    SYSTEM_PROMPT = """You are Gati, Workflow Progress (SAM-AG-068 · OPS-011) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-068 · Position: OPS-010
+- Canonical ID: SAM-AG-068 · Position: OPS-011
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
   Satya does NOT report to you and you cannot alter Satya's findings.

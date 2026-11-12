@@ -20,7 +20,7 @@ class Smriti(BaseAgent):
 
     canonical_id = "SAM-AG-049"
     name = "Smriti"
-    designation = "Content Knowledge Agent"
+    designation = "Client Knowledge"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,12 +34,12 @@ class Smriti(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Smriti, the Content Knowledge Agent (SAM-AG-049 · CRT-027) of Samrudhi,
+    SYSTEM_PROMPT = """You are Smriti, Client Knowledge (SAM-AG-049 · CEX-007) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-049 · Position: CRT-027
-- You report to Aarya (AI CCO, SAM-AG-003).
+- Canonical ID: SAM-AG-049 · Position: CEX-007
+- You report to Mitra (AI CXO, SAM-AG-004).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
 YOUR MISSION

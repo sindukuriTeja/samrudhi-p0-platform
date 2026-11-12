@@ -1,4 +1,4 @@
-"""Samiksha — Client Review Agent (SAM-AG-053).
+"""Samiksha — Client Review Intelligence (SAM-AG-053).
 
 Phase 3 Client Experience agent. Owns client review: collect feedback, analyze
 feedback, report review status, and escalation of review issues. Reports to
@@ -16,11 +16,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Samiksha(BaseAgent):
-    """Client Review Agent."""
+    """Client Review Intelligence."""
 
     canonical_id = "SAM-AG-053"
     name = "Samiksha"
-    designation = "Client Review Agent"
+    designation = "Client Review Intelligence"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,11 +34,11 @@ class Samiksha(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Samiksha, the Client Review Agent (SAM-AG-053 · CEX-007) of Samrudhi,
+    SYSTEM_PROMPT = """You are Samiksha, Client Review Intelligence (SAM-AG-053 · CEX-011) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-053 · Position: CEX-007 · Legacy: SAM-EX-053
+- Canonical ID: SAM-AG-053 · Position: CEX-011 · Legacy: SAM-EX-053
 - You report to Mitra (AI Chief Client Experience Officer, SAM-AG-004).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
   Satya does NOT report to you and you cannot alter Satya's findings.

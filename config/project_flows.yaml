@@ -5,6 +5,7 @@
 # (workers.tasks.run_agent_task), after checking the agent is Active and that
 # the step's permission passes the authority guard.
 #
+# Agent roles follow config/agent_registry.yaml (PDF canonical registry, Document 01C).
 # Stage names follow Daksh's delivery workflow state machine
 # (SAM-AG-002 get_workflow_state: planning -> allocated -> executing -> quality
 # -> approved -> delivered). Agents and actions come from each agent's own
@@ -32,7 +33,7 @@ flows:
     steps:
       - key: brief
         stage: planning
-        agent: SAM-AG-049        # Smriti - client context and content knowledge
+        agent: SAM-AG-049        # Smriti - Client Knowledge (CEX-007)
         action: capture
         permission: crt.capture_context
         tag: Client brief
@@ -56,9 +57,9 @@ flows:
 
       - key: direction
         stage: planning
-        agent: SAM-AG-059        # Yojana - campaign strategy
-        action: plan
-        permission: crt.define_campaign
+        agent: SAM-AG-076        # Disha - Content Strategy & Research Lead (CRT-002)
+        action: strategy
+        permission: crt.set_key_messages
         tag: Content direction
         responsibility: Sets the content direction
         instruction: >-

@@ -1,8 +1,12 @@
-"""Saarthi — Client Communication Agent (SAM-AG-045).
+"""Saarthi — Client Operations Lead (SAM-AG-045 · CEX-003).
 
-Phase 3 Client Experience agent. Owns client communication: sending updates,
-scheduling communications, tracking communication history, and escalation of
-communication issues. Reports to Mitra (SAM-AG-004).
+Stage 2 Phase 3 operations, client, analytics and CEO-office agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Run client operations: log and prioritise client requests, coordinate internal delivery
+assignments, monitor request service levels and keep the client informed of progress.
+[PDF 01A.04 · CEX-003 Client Operations & Coordination Lead; processes CEX-P09 to
+CEX-P12]
+Reports to Mitra (AI CXO, SAM-AG-004).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -14,59 +18,71 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Saarthi(BaseAgent):
-    """Client Communication Agent."""
+    """Client Operations Lead."""
 
     canonical_id = "SAM-AG-045"
     name = "Saarthi"
-    designation = "Client Communication Agent"
+    designation = "Client Operations Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
-        "cex.communicate_client": True,
-        "cex.send_update": True,
-        "cex.schedule_communication": True,
-        "cex.track_communication": True,
-        "cex.escalate_communication_issue": True,
-        "tec.grant_access": False,
+        "cex.log_client_request": True,
+        "cex.prioritise_request": True,
+        "cex.coordinate_delivery": True,
+        "cex.track_request_sla": True,
+        "cex.escalate_request": True,
         "gov.certify": False,
         "gov.modify_finding": False,
+        "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Saarthi, the Client Communication Agent (SAM-AG-045 · CEX-003) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "log_client_request": "cex.log_client_request",
+        "prioritise_request": "cex.prioritise_request",
+        "coordinate_delivery_assignment": "cex.coordinate_delivery",
+        "track_request_sla": "cex.track_request_sla",
+        "escalate_request": "cex.escalate_request",
+    }
+
+    SYSTEM_PROMPT = """You are Saarthi, Client Operations Lead (SAM-AG-045 · CEX-003) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-045 · Position: CEX-003 · Legacy: SAM-EX-045
-- You report to Mitra (AI Chief Client Experience Officer, SAM-AG-004).
+- Canonical ID: SAM-AG-045 · Position: CEX-003 · Department: Client Experience & Account Management
+- You report to Mitra (AI CXO, SAM-AG-004).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
-  Satya does NOT report to you and you cannot alter Satya's findings.
 
 YOUR MISSION
-Own client communication: send updates, schedule communications, track all
-communication history, and escalate communication issues. Every communication
-must be accurate, timely and documented. Never fabricate communication records.
+Run client operations: log and prioritise client requests, coordinate internal delivery
+assignments, monitor request service levels and keep the client informed of progress. [PDF
+01A.04 · CEX-003 Client Operations & Coordination Lead; processes CEX-P09 to CEX-P12]
 
-YOUR FIVE REGISTERS
-1. Communication Register — all communications: type, date, content, status
-2. Update Register — scheduled and sent updates per client
-3. Communication Schedule Register — upcoming communications, deadlines
-4. Communication Tracking Register — delivery status, read receipts, responses
-5. Communication Escalation Register — failed communications, escalations
+YOUR REGISTERS
+1. Client Request Register — request, client, priority, owner, SLA, status
+2. Delivery Coordination Register — request, assigned team, handoff, status
+3. SLA Register — target, actual, breach, escalation
+
+AUTHORITY MATRIX
+cex.log_client_request · cex.prioritise_request · cex.coordinate_delivery · cex.track_request_sla · cex.escalate_request
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never fabricate communication records or delivery status. Missing = "unavailable".
-2. Never send communications outside approved scope — route to human.
-3. Never suppress a failed communication to improve your score.
-4. Respect tenant isolation — never cross-client communication leakage.
-5. Satya's findings are immutable to you — read-only.
-6. Every communication has a timestamp, owner and delivery record.
-7. If the local model is down, report it honestly — do not fake output."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Never promise delivery dates that operations has not confirmed.
+5. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "communicate")
+        action = kwargs.get("action", "coordinate")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -89,7 +105,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="cex.communication",
+                event_type="cex.operations",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -104,135 +120,77 @@ HARD RULES — NEVER VIOLATE
     # Saarthi's tools (authority-guarded)
     # ------------------------------------------------------------------
 
-    @authority_guard("cex.communicate_client")
-    def communicate_client(
-        self,
-        client_id: str,
-        channel: str,
-        content: str,
-        priority: str = "normal",
-    ) -> dict:
-        """Initiate communication with a client."""
-        comm_id = f"COMM-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("cex.log_client_request")
+    def log_client_request(self, client_id: str, request: str) -> dict:
+        """Log a client request."""
         return {
-            "comm_id": comm_id,
+            "record_id": f"SAA-{uuid.uuid4().hex[:6].upper()}",
             "client_id": client_id,
-            "channel": channel,
-            "content": content,
+            "request": request,
+            "action": "log_client_request",
+            "status": "recorded",
+            "recorded_at": _now(),
+        }
+
+    @authority_guard("cex.prioritise_request")
+    def prioritise_request(self, request_id: str, priority: str) -> dict:
+        """Set a request's priority."""
+        return {
+            "record_id": f"SAA-{uuid.uuid4().hex[:6].upper()}",
+            "request_id": request_id,
             "priority": priority,
-            "status": "sent",
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "action": "prioritise_request",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("cex.send_update")
-    def send_update(
-        self,
-        client_id: str,
-        update_type: str,
-        summary: str,
-        details: dict,
-    ) -> dict:
-        """Send a status update to a client."""
-        update_id = f"UPD-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("cex.coordinate_delivery")
+    def coordinate_delivery_assignment(self, request_id: str, team: str) -> dict:
+        """Hand a request to the delivery team."""
         return {
-            "update_id": update_id,
-            "client_id": client_id,
-            "update_type": update_type,
-            "summary": summary,
-            "details": details,
-            "status": "dispatched",
-            "dispatched_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SAA-{uuid.uuid4().hex[:6].upper()}",
+            "request_id": request_id,
+            "team": team,
+            "action": "coordinate_delivery_assignment",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("cex.schedule_communication")
-    def schedule_communication(
-        self,
-        client_id: str,
-        comm_type: str,
-        scheduled_time: str,
-        participants: list,
-    ) -> dict:
-        """Schedule a future communication with a client."""
-        schedule_id = f"SCH-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("cex.track_request_sla")
+    def track_request_sla(self, request_id: str, sla_hours: int) -> dict:
+        """Track a request against its SLA."""
         return {
-            "schedule_id": schedule_id,
-            "client_id": client_id,
-            "comm_type": comm_type,
-            "scheduled_time": scheduled_time,
-            "participants": participants,
-            "status": "scheduled",
-            "scheduled_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SAA-{uuid.uuid4().hex[:6].upper()}",
+            "request_id": request_id,
+            "sla_hours": sla_hours,
+            "action": "track_request_sla",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("cex.track_communication")
-    def track_communication(
-        self,
-        comm_id: str,
-    ) -> dict:
-        """Track delivery status of a communication."""
+    @authority_guard("cex.escalate_request")
+    def escalate_request(self, request_id: str, reason: str) -> dict:
+        """Escalate a request."""
         return {
-            "comm_id": comm_id,
-            "delivery_status": "unknown",
-            "read_status": "unknown",
-            "response_status": "pending",
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SAA-{uuid.uuid4().hex[:6].upper()}",
+            "request_id": request_id,
+            "reason": reason,
+            "action": "escalate_request",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("cex.escalate_communication_issue")
-    def escalate_communication_issue(
-        self,
-        client_id: str,
-        severity: str,
-        description: str,
-        affected_communications: list,
-    ) -> dict:
-        """Escalate a communication issue to human."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
-        return {
-            "incident_id": incident_id,
-            "client_id": client_id,
-            "severity": severity,
-            "description": description,
-            "affected_communications": affected_communications,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
-        }
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
 
-    def list_communications(
-        self,
-        client_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List communications (read-only)."""
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
         return {
-            "communications": [],
+            "records": [],
             "count": 0,
-            "filter": {"client_id": client_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_communication_history(
-        self,
-        client_id: str,
-    ) -> dict:
-        """Get communication history for a client (read-only)."""
-        return {
-            "client_id": client_id,
-            "history": [],
-            "count": 0,
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def list_scheduled_communications(
-        self,
-        client_id: str | None = None,
-    ) -> dict:
-        """List scheduled communications (read-only)."""
-        return {
-            "scheduled": [],
-            "count": 0,
-            "filter": {"client_id": client_id},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -247,5 +205,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

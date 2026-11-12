@@ -1,0 +1,821 @@
+# Canonical agent registry for the built stages (Stage 1 P0 + Stage 2 phases 1-3).
+# Single source of truth for IDs, positions, titles, departments and reporting lines.
+# Generated from the PDF canonical registry; edit only with a PDF reference.
+source: SAMRUDHI AGENTIC AI(1).pdf, Document 01C Canonical Digital Workforce Registry (194 positions); stages and phases from
+  the digital-marketing spec repo README (P0 = 30, P1 phases 1-3 = 49).
+departments:
+  CEO:
+    name: CEO Office & Enterprise Strategy
+    head: SAM-AG-001
+  CEX:
+    name: Client Experience & Account Management
+    head: SAM-AG-004
+  OPS:
+    name: Operations & Delivery Management
+    head: SAM-AG-002
+  CRT:
+    name: Creative, Content & Social Media
+    head: SAM-AG-003
+  DAT:
+    name: Analytics, Intelligence & Reporting
+    head: SAM-AG-009
+  FIN:
+    name: Finance & Administration
+    head: SAM-AG-006
+  TEC:
+    name: Technology, MCP & AgentOps
+    head: SAM-AG-007
+  GOV:
+    name: Independent Assurance, Compliance & Agent Performance
+    head: SAM-AG-010
+agents:
+- canonical_id: SAM-AG-001
+  name: Arjun
+  position_id: CEO-001
+  title: AI CEO
+  department_code: CEO
+  department: CEO Office & Enterprise Strategy
+  reports_to: HUMAN-BOARD
+  stage: P0-1A
+  priority: P0
+  agent_type: thinking
+- canonical_id: SAM-AG-007
+  name: Sutra
+  position_id: TEC-001
+  title: AI Chief Technology Officer
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-001
+  stage: P0-1A
+  priority: P0
+  agent_type: thinking
+- canonical_id: SAM-AG-010
+  name: Satya
+  position_id: GOV-001
+  title: AI Chief Assurance Agent
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: HUMAN-BOARD
+  stage: P0-1A
+  priority: P0
+  agent_type: thinking
+- canonical_id: SAM-AG-158
+  name: Niyantrak
+  position_id: TEC-007
+  title: AgentOps & DWMS Lead
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1A
+  priority: P0
+  agent_type: thinking
+- canonical_id: SAM-AG-153
+  name: Vinyas
+  position_id: TEC-002
+  title: Platform Architecture Lead
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-154
+  name: Setubandh
+  position_id: TEC-003
+  title: MCP & Integration Lead
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-155
+  name: Yantra
+  position_id: TEC-004
+  title: Agent Runtime Lead
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-156
+  name: Smaran
+  position_id: TEC-005
+  title: Knowledge & Context Lead
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-157
+  name: Suraksha
+  position_id: TEC-006
+  title: Security & Reliability Lead
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-159
+  name: Pehchaan
+  position_id: TEC-008
+  title: Agent Identity & Registry
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-160
+  name: Jod
+  position_id: TEC-009
+  title: MCP Connectors
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-161
+  name: Adhikar
+  position_id: TEC-010
+  title: Tool Permissions
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-162
+  name: Pravahika
+  position_id: TEC-011
+  title: Workflow Runtime
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-163
+  name: Sandarbhika
+  position_id: TEC-012
+  title: Context Retrieval
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-166
+  name: Nirikshak
+  position_id: TEC-015
+  title: Observability & Telemetry
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-167
+  name: Parikshak
+  position_id: TEC-016
+  title: Testing & Evaluation Engineering
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-168
+  name: Sanskaran
+  position_id: TEC-017
+  title: Versioning & Release
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-170
+  name: Chaukidar
+  position_id: TEC-019
+  title: Security Monitoring
+  department_code: TEC
+  department: Technology, MCP & AgentOps
+  reports_to: SAM-AG-007
+  stage: P0-1B
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-176
+  name: Pramana
+  position_id: GOV-002
+  title: Competency & Certification Lead
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-177
+  name: Nishtha
+  position_id: GOV-003
+  title: Performance & Quality Assurance Lead
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-178
+  name: Maryada
+  position_id: GOV-004
+  title: Compliance, Privacy & Risk Assurance Lead
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-181
+  name: Yogyata
+  position_id: GOV-007
+  title: Competency Assessment
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: role
+- canonical_id: SAM-AG-182
+  name: Pramanik
+  position_id: GOV-008
+  title: Certification & Recertification
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: role
+- canonical_id: SAM-AG-183
+  name: Gunvatta
+  position_id: GOV-009
+  title: Output Quality Evaluation
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: role
+- canonical_id: SAM-AG-184
+  name: Nishpaksh
+  position_id: GOV-010
+  title: Independent Performance Scoring
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: role
+- canonical_id: SAM-AG-185
+  name: Seema
+  position_id: GOV-011
+  title: Authority & Permission Audit
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-186
+  name: Swasthya
+  position_id: GOV-012
+  title: Healthcare Content & Advertising Compliance
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: role
+- canonical_id: SAM-AG-187
+  name: Gopniya
+  position_id: GOV-013
+  title: Privacy & Confidentiality
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-189
+  name: Sakshi
+  position_id: GOV-015
+  title: Audit Evidence & Traceability Review
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-192
+  name: Sankat
+  position_id: GOV-018
+  title: Critical Risk & Escalation
+  department_code: GOV
+  department: Independent Assurance, Compliance & Agent Performance
+  reports_to: SAM-AG-010
+  stage: P0-1C
+  priority: P0
+  agent_type: service-first
+- canonical_id: SAM-AG-002
+  name: Daksh
+  position_id: OPS-001
+  title: AI COO
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-001
+  stage: P1-P1
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-003
+  name: Aarya
+  position_id: CRT-001
+  title: AI Chief Creative Officer
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-001
+  stage: P1-P1
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-004
+  name: Mitra
+  position_id: CEX-001
+  title: AI Chief Client Experience Officer
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-001
+  stage: P1-P1
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-009
+  name: Medha
+  position_id: DAT-001
+  title: AI Chief Data & Intelligence Officer
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-001
+  stage: P1-P1
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-049
+  name: Smriti
+  position_id: CEX-007
+  title: Client Knowledge
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-004
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-050
+  name: Shruti
+  position_id: CEX-008
+  title: Client Brief & Requirements
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-004
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-059
+  name: Yojana
+  position_id: OPS-002
+  title: Delivery Planning Lead
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-076
+  name: Disha
+  position_id: CRT-002
+  title: Content Strategy & Research Lead
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-077
+  name: Kalpana
+  position_id: CRT-003
+  title: Editorial Planning Lead
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-078
+  name: Roop
+  position_id: CRT-004
+  title: Creative Production Lead
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-079
+  name: Tarangini
+  position_id: CRT-005
+  title: Social Media & Distribution Lead
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-080
+  name: Shuddhi
+  position_id: CRT-006
+  title: Content Quality & Clinical Screening Lead
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-081
+  name: Anvesh
+  position_id: CRT-007
+  title: Healthcare Content Research
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-082
+  name: Lekha
+  position_id: CRT-008
+  title: Healthcare Copywriting
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-083
+  name: Chitra
+  position_id: CRT-009
+  title: Visual Creative Production
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-084
+  name: Prakash
+  position_id: CRT-010
+  title: Content Publishing
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-085
+  name: Drishti
+  position_id: CRT-011
+  title: Social Media Performance
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-094
+  name: Pariksha
+  position_id: CRT-020
+  title: Platform & Technical Content QA
+  department_code: CRT
+  department: Creative, Content & Social Media
+  reports_to: SAM-AG-003
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-125
+  name: Prativedan
+  position_id: DAT-011
+  title: Client Reporting
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-146
+  name: Lagaat
+  position_id: FIN-014
+  title: AI Workforce & Service Costing
+  department_code: FIN
+  department: Finance & Administration
+  reports_to: SAM-AG-006
+  stage: P1-P2
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-012
+  name: Lakshya
+  position_id: CEO-003
+  title: Enterprise KPI Intelligence
+  department_code: CEO
+  department: CEO Office & Enterprise Strategy
+  reports_to: SAM-AG-001
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-013
+  name: Samanvay
+  position_id: CEO-004
+  title: Executive Coordination
+  department_code: CEO
+  department: CEO Office & Enterprise Strategy
+  reports_to: SAM-AG-001
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-044
+  name: Sneha
+  position_id: CEX-002
+  title: Client Success Lead
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-004
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-045
+  name: Saarthi
+  position_id: CEX-003
+  title: Client Operations Lead
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-004
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-048
+  name: Swagat
+  position_id: CEX-006
+  title: Client Onboarding
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-004
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-051
+  name: Sandesh
+  position_id: CEX-009
+  title: Client Communication
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-004
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-052
+  name: Sweekriti
+  position_id: CEX-010
+  title: Client Approval
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-004
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-053
+  name: Samiksha
+  position_id: CEX-011
+  title: Client Review Intelligence
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-004
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-055
+  name: Samadhan
+  position_id: CEX-013
+  title: Complaint & Escalation
+  department_code: CEX
+  department: Client Experience & Account Management
+  reports_to: SAM-AG-004
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-060
+  name: Niyojan
+  position_id: OPS-003
+  title: Resource & Capacity Lead
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-061
+  name: Pravartan
+  position_id: OPS-004
+  title: Workflow Orchestration Lead
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-062
+  name: Nirikshan
+  position_id: OPS-005
+  title: Delivery Control Lead
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-064
+  name: Sankalan
+  position_id: OPS-007
+  title: Scope-to-Delivery Planning
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-065
+  name: Samay
+  position_id: OPS-008
+  title: Production Scheduling
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-066
+  name: Vitaran
+  position_id: OPS-009
+  title: Task Allocation
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-067
+  name: Kshamata
+  position_id: OPS-010
+  title: Agent Capacity
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-068
+  name: Gati
+  position_id: OPS-011
+  title: Workflow Progress
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-070
+  name: Suchak
+  position_id: OPS-013
+  title: Delivery Early Warning
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-071
+  name: Punargathan
+  position_id: OPS-014
+  title: Rework Coordination
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-072
+  name: Pramaan
+  position_id: OPS-015
+  title: Delivery Acceptance
+  department_code: OPS
+  department: Operations & Delivery Management
+  reports_to: SAM-AG-002
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-116
+  name: Srotas
+  position_id: DAT-002
+  title: Data Integration Lead
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-117
+  name: Satvik
+  position_id: DAT-003
+  title: Data Quality & Governance Lead
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-118
+  name: Darshan
+  position_id: DAT-004
+  title: BI & Reporting Lead
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-121
+  name: Sangrah
+  position_id: DAT-007
+  title: Data Ingestion
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-122
+  name: Shodhan
+  position_id: DAT-008
+  title: Data Cleaning & Validation
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-123
+  name: Samanjasya
+  position_id: DAT-009
+  title: Data Reconciliation
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-124
+  name: Paribhasha
+  position_id: DAT-010
+  title: KPI Definition Governance
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-126
+  name: Darpan
+  position_id: DAT-012
+  title: Dashboards & Visualisation
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking
+- canonical_id: SAM-AG-130
+  name: Chetak
+  position_id: DAT-016
+  title: Anomaly Detection
+  department_code: DAT
+  department: Analytics, Intelligence & Reporting
+  reports_to: SAM-AG-009
+  stage: P1-P3
+  priority: P1
+  agent_type: thinking

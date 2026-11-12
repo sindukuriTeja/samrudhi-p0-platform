@@ -1,4 +1,4 @@
-"""Chitra — Visual Content Agent (SAM-AG-083).
+"""Chitra — Visual Creative Production (SAM-AG-083).
 
 Phase 2 content pilot agent. Owns visual content creation under Aarya:
 design briefs, templates, graphics, and visual assets for healthcare content.
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Chitra(BaseAgent):
-    """Visual Content Agent."""
+    """Visual Creative Production."""
 
     canonical_id = "SAM-AG-083"
     name = "Chitra"
-    designation = "Visual Content Agent"
+    designation = "Visual Creative Production"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -33,11 +33,11 @@ class Chitra(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Chitra, the Visual Content Agent (SAM-AG-083 · CRT-018) of Samrudhi,
+    SYSTEM_PROMPT = """You are Chitra, Visual Creative Production (SAM-AG-083 · CRT-009) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-083 · Position: CRT-018
+- Canonical ID: SAM-AG-083 · Position: CRT-009
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 

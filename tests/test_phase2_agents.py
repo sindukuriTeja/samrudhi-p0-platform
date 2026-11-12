@@ -57,6 +57,12 @@ PHASE2_NAMES = {
 }
 
 
+import yaml as _yaml
+from pathlib import Path as _Path
+REGISTRY = {a["canonical_id"]: a for a in _yaml.safe_load(
+    (_Path(__file__).resolve().parent.parent / "config" / "agent_registry.yaml").read_text(encoding="utf-8"))["agents"]}
+
+
 @pytest.fixture(autouse=True)
 def _load_phase2_agents():
     load_all()
@@ -77,13 +83,9 @@ class TestPhase2Registration:
             assert cls.name == PHASE2_NAMES[cid], f"Wrong name for {cid}"
 
     def test_phase2_agent_designation(self):
-        """Phase 2 agents have Content/Healthcare-related designations."""
+        """Phase 2 designations match the PDF canonical registry (config/agent_registry.yaml)."""
         for cid in PHASE2_IDS:
-            cls = _REGISTRY[cid]
-            assert any(
-                kw in cls.designation for kw in
-                ("Content", "Healthcare", "Social Media", "Analytics", "Strategy", "Research", "Planning", "Creative", "Video", "Visual", "Review", "Reporting", "Continuity", "Publishing", "Compliance")
-            ), f"{cid} designation unexpected: {cls.designation}"
+            assert _REGISTRY[cid].designation == REGISTRY[cid]["title"], f"{cid} designation differs from registry"
 
     def test_phase2_agent_type_thinking(self):
         """Phase 2 agents are thinking-type agents."""
@@ -91,11 +93,10 @@ class TestPhase2Registration:
             cls = _REGISTRY[cid]
             assert cls.agent_type == "thinking", f"{cid} agent_type is {cls.agent_type}"
 
-    def test_phase2_system_prompt_mentions_aarya(self):
-        """Phase 2 agents mention reporting to Aarya in SYSTEM_PROMPT."""
+    def test_phase2_system_prompt_names_manager(self):
+        """Each Phase 2 agent's prompt names the manager it reports to in the registry."""
         for cid in PHASE2_IDS:
-            cls = _REGISTRY[cid]
-            assert "SAM-AG-003" in cls.SYSTEM_PROMPT, f"{cid} SYSTEM_PROMPT missing Aarya ref"
+            assert REGISTRY[cid]["reports_to"] in _REGISTRY[cid].SYSTEM_PROMPT, f"{cid} prompt misses its manager"
 
 
 # =============================================================================
@@ -130,18 +131,6 @@ class TestPhase2AuthorityEnforcement:
         assert m.get("crt.capture_context") is True
         assert m.get("crt.store_knowledge") is True
 
-    def test_shruti_authority(self):
-        """Shruti has social media authority."""
-        m = load_authority_matrix("SAM-AG-050")
-        assert m.get("crt.publish_post") is True
-        assert m.get("crt.schedule_post") is True
-
-    def test_yojana_authority(self):
-        """Yojana has campaign strategy authority."""
-        m = load_authority_matrix("SAM-AG-059")
-        assert m.get("crt.define_campaign") is True
-        assert m.get("crt.plan_calendar") is True
-
     def test_anvesh_authority(self):
         """Anvesh has research authority."""
         m = load_authority_matrix("SAM-AG-081")
@@ -166,13 +155,6 @@ class TestPhase2AuthorityEnforcement:
         assert m.get("crt.produce_content_report") is True
         assert m.get("crt.produce_client_report") is True
 
-    def test_lagaat_authority(self):
-        """Lagaat has continuity authority."""
-        m = load_authority_matrix("SAM-AG-146")
-        assert m.get("crt.track_continuity") is True
-        assert m.get("crt.manage_crm_data") is True
-
-
 # =============================================================================
 # AUTHORITY DECORATOR ENFORCEMENT
 # =============================================================================
@@ -192,25 +174,6 @@ class TestPhase2AuthorityDecorator:
         )
         assert isinstance(result, dict)
         assert result.get("status") == "captured"
-
-    def test_shruti_publish_post_allowed(self):
-        """Shruti can publish posts."""
-        a = self._make_agent("SAM-AG-050")
-        result = a.publish_post(
-            client_id="TEST-001", post_ref="P-001", approval_ref="A-001", platform="instagram"
-        )
-        assert isinstance(result, dict)
-        assert result.get("status") == "published"
-
-    def test_yojana_define_campaign_allowed(self):
-        """Yojana can define campaigns."""
-        a = self._make_agent("SAM-AG-059")
-        result = a.define_campaign(
-            client_id="TEST-001", title="test", objective="test",
-            theme="test", duration={}
-        )
-        assert isinstance(result, dict)
-        assert result.get("campaign_id") is not None
 
     def test_anvesh_research_topic_allowed(self):
         """Anvesh can research topics."""
@@ -246,16 +209,6 @@ class TestPhase2AuthorityDecorator:
         assert isinstance(result, dict)
         assert result.get("status") == "validated"
 
-    def test_lagaat_track_continuity_allowed(self):
-        """Lagaat can track continuity."""
-        a = self._make_agent("SAM-AG-146")
-        result = a.track_content_continuity(
-            client_id="TEST-001", content_ref="test", lifecycle_stage="draft"
-        )
-        assert isinstance(result, dict)
-        assert result.get("status") == "tracked"
-
-
 # =============================================================================
 # READ-ONLY METHODS EXIST AND WORK
 # =============================================================================
@@ -272,20 +225,6 @@ class TestPhase2ReadonlyMethods:
         result = a.list_contexts(client_id="TEST-001")
         assert isinstance(result, dict)
         assert "contexts" in result
-        assert result.get("count") == 0
-
-    def test_shruti_list_scheduled_posts(self):
-        a = self._make_agent("SAM-AG-050")
-        result = a.list_scheduled_posts(client_id="TEST-001")
-        assert isinstance(result, dict)
-        assert "posts" in result
-        assert result.get("count") == 0
-
-    def test_yojana_list_campaigns(self):
-        a = self._make_agent("SAM-AG-059")
-        result = a.list_campaigns(client_id="TEST-001")
-        assert isinstance(result, dict)
-        assert "campaigns" in result
         assert result.get("count") == 0
 
     def test_anvesh_list_research(self):
@@ -315,14 +254,6 @@ class TestPhase2ReadonlyMethods:
         assert isinstance(result, dict)
         assert "reports" in result
         assert result.get("count") == 0
-
-    def test_lagaat_list_continuity(self):
-        a = self._make_agent("SAM-AG-146")
-        result = a.list_continuity(client_id="TEST-001")
-        assert isinstance(result, dict)
-        assert "continuity" in result
-        assert result.get("count") == 0
-
 
 # =============================================================================
 # ROUTE FOR APPROVAL EXISTS
@@ -358,18 +289,6 @@ class TestPhase2RunMethod:
         assert result.agent_id == "SAM-AG-049"
         assert result.status in ("completed", "failed")
 
-    def test_shruti_run(self):
-        a = _REGISTRY["SAM-AG-050"]()
-        result = a.run("test task", action="publish")
-        assert result.agent_id == "SAM-AG-050"
-        assert result.status in ("completed", "failed")
-
-    def test_yojana_run(self):
-        a = _REGISTRY["SAM-AG-059"]()
-        result = a.run("test task", action="plan")
-        assert result.agent_id == "SAM-AG-059"
-        assert result.status in ("completed", "failed")
-
     def test_anvesh_run(self):
         a = _REGISTRY["SAM-AG-081"]()
         result = a.run("test task", action="research")
@@ -393,13 +312,6 @@ class TestPhase2RunMethod:
         result = a.run("test task", action="report")
         assert result.agent_id == "SAM-AG-125"
         assert result.status in ("completed", "failed")
-
-    def test_lagaat_run(self):
-        a = _REGISTRY["SAM-AG-146"]()
-        result = a.run("test task", action="track")
-        assert result.agent_id == "SAM-AG-146"
-        assert result.status in ("completed", "failed")
-
 
 # =============================================================================
 # TENANT ISOLATION DEFAULTS
@@ -451,20 +363,6 @@ class TestPhase2MessageBus:
         assert len(published) == 1
         assert published[0].source_agent == "SAM-AG-049"
 
-    def test_shruti_publishes(self, monkeypatch):
-        published = self._patch_bus_and_llm(monkeypatch)
-        a = _REGISTRY["SAM-AG-050"]()
-        a.run("test", action="publish")
-        assert len(published) == 1
-        assert published[0].source_agent == "SAM-AG-050"
-
-    def test_yojana_publishes(self, monkeypatch):
-        published = self._patch_bus_and_llm(monkeypatch)
-        a = _REGISTRY["SAM-AG-059"]()
-        a.run("test", action="plan")
-        assert len(published) == 1
-        assert published[0].source_agent == "SAM-AG-059"
-
     def test_anvesh_publishes(self, monkeypatch):
         published = self._patch_bus_and_llm(monkeypatch)
         a = _REGISTRY["SAM-AG-081"]()
@@ -493,9 +391,3 @@ class TestPhase2MessageBus:
         assert len(published) == 1
         assert published[0].source_agent == "SAM-AG-125"
 
-    def test_lagaat_publishes(self, monkeypatch):
-        published = self._patch_bus_and_llm(monkeypatch)
-        a = _REGISTRY["SAM-AG-146"]()
-        a.run("test", action="track")
-        assert len(published) == 1
-        assert published[0].source_agent == "SAM-AG-146"

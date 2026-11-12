@@ -1,8 +1,12 @@
-"""Sankalan — Resource Consolidation Agent (SAM-AG-064 · OPS-006).
+"""Sankalan — Scope-to-Delivery Planning (SAM-AG-064 · OPS-007).
 
-Phase 3 operations agent. Consolidates resources, aggregates capacity,
-reviews availability, and reports consolidation status. Reports to
-Daksh (SAM-AG-002, AI COO).
+Stage 2 Phase 3 operations, client, analytics and CEO-office agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Convert the signed scope and the client brief into delivery requirements and work
+packages (for example 20 posts, 4 articles), and flag missing requirements before
+production starts. [PDF 01A.05 · OPS-007 Scope-to-Delivery Planning; processes OPS-P02,
+OPS-P03]
+Reports to Daksh (AI COO, SAM-AG-002).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -14,63 +18,71 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Sankalan(BaseAgent):
-    """Resource Consolidation Agent."""
+    """Scope-to-Delivery Planning."""
 
     canonical_id = "SAM-AG-064"
     name = "Sankalan"
-    designation = "Resource Consolidation Agent"
+    designation = "Scope-to-Delivery Planning"
     agent_type = "thinking"
 
     AUTHORITY = {
-        "ops.consolidate_resources": True,
-        "ops.aggregate_capacity": True,
-        "ops.review_availability": True,
-        "ops.report_consolidation": True,
-        "ops.escalate_consolidation_issue": True,
+        "ops.analyse_scope": True,
+        "ops.build_work_packages": True,
+        "ops.map_requirements": True,
+        "ops.flag_missing_requirement": True,
+        "ops.escalate_scope_gap": True,
         "gov.certify": False,
         "gov.modify_finding": False,
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Sankalan, the Resource Consolidation Agent (SAM-AG-064 · OPS-006) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "analyse_scope": "ops.analyse_scope",
+        "build_work_packages": "ops.build_work_packages",
+        "map_requirements": "ops.map_requirements",
+        "flag_missing_requirement": "ops.flag_missing_requirement",
+        "escalate_scope_gap": "ops.escalate_scope_gap",
+    }
+
+    SYSTEM_PROMPT = """You are Sankalan, Scope-to-Delivery Planning (SAM-AG-064 · OPS-007) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-064 · Position: OPS-006
+- Canonical ID: SAM-AG-064 · Position: OPS-007 · Department: Operations & Delivery Management
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
-  Satya does NOT report to you and you cannot alter Satya's findings.
 
 YOUR MISSION
-Consolidate resources, aggregate capacity, review availability, and report
-consolidation status. Every consolidation action has evidence and audit trail.
+Convert the signed scope and the client brief into delivery requirements and work packages (for
+example 20 posts, 4 articles), and flag missing requirements before production starts. [PDF
+01A.05 · OPS-007 Scope-to-Delivery Planning; processes OPS-P02, OPS-P03]
 
 YOUR REGISTERS
-1. Consolidation Register — consolidated resources, sources, targets
-2. Capacity Aggregation Register — aggregated capacity, sources, totals
-3. Availability Register — availability status, agents, resources
-4. Consolidation Report Register — reports, periods, summaries
-5. Consolidation Issue Register — issues, escalations, resolutions
+1. Scope Register — client, signed scope, version
+2. Work Package Register — package, type, sequence, status
+3. Requirement Gap Register — gap, impact, owner
 
 AUTHORITY MATRIX
-ops.consolidate_resources · ops.aggregate_capacity · ops.review_availability
-ops.report_consolidation · ops.escalate_consolidation_issue · gov.certify=False
-gov.modify_finding=False · tec.grant_access=False
+ops.analyse_scope · ops.build_work_packages · ops.map_requirements · ops.flag_missing_requirement · ops.escalate_scope_gap
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never fabricate resource availability — missing data = "unavailable".
-2. Never suppress a capacity shortfall or overstate available resources.
-3. Never change commercial terms — route to human.
-4. Respect tenant isolation — never cross-tenant data leakage.
-5. Satya's findings are immutable to you — read-only.
-6. Every consolidation has source tracking and audit evidence.
-7. If the local model is down, report it honestly — do not fake output."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Never create packages beyond the signed scope.
+5. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "consolidate")
+        action = kwargs.get("action", "plan")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -93,7 +105,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="ops.consolidate",
+                event_type="ops.scope",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -104,127 +116,86 @@ HARD RULES — NEVER VIOLATE
             pass
         return AgentResult(text=text, agent_id=self.canonical_id, tokens_used=tokens, status="completed")
 
-    @authority_guard("ops.consolidate_resources")
-    def consolidate_resources(
-        self,
-        resource_types: list,
-        sources: list,
-        target: str,
-    ) -> dict:
-        """Consolidate resources from multiple sources."""
-        consolidation_id = f"CONS-{uuid.uuid4().hex[:6].upper()}"
+    # ------------------------------------------------------------------
+    # Sankalan's tools (authority-guarded)
+    # ------------------------------------------------------------------
+
+    @authority_guard("ops.analyse_scope")
+    def analyse_scope(self, client_id: str, signed_scope: str) -> dict:
+        """Analyse the signed scope."""
         return {
-            "consolidation_id": consolidation_id,
-            "resource_types": resource_types,
-            "sources": sources,
-            "target": target,
-            "status": "consolidated",
-            "consolidated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SAN-{uuid.uuid4().hex[:6].upper()}",
+            "client_id": client_id,
+            "signed_scope": signed_scope,
+            "action": "analyse_scope",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.aggregate_capacity")
-    def aggregate_capacity(
-        self,
-        agents: list,
-        resource_type: str,
-    ) -> dict:
-        """Aggregate capacity across agents."""
-        total_capacity = len(agents) * 100  # placeholder
+    @authority_guard("ops.build_work_packages")
+    def build_work_packages(self, client_id: str, scope: dict) -> dict:
+        """Split scope quantities into work packages."""
+        packages = []
+        for kind, qty in (scope or {}).items():
+            for n in range(1, int(qty) + 1):
+                packages.append({"package_id": f"WP-{uuid.uuid4().hex[:6].upper()}",
+                                 "type": kind, "sequence": n, "status": "planned"})
         return {
-            "resource_type": resource_type,
-            "agents": agents,
-            "total_capacity": total_capacity,
-            "agent_count": len(agents),
-            "aggregated_at": datetime.now(timezone.utc).isoformat(),
+            "client_id": client_id,
+            "scope": scope,
+            "work_packages": packages,
+            "package_count": len(packages),
+            "status": "planned" if packages else "empty_scope",
+            "built_at": _now(),
         }
 
-    @authority_guard("ops.review_availability")
-    def review_availability(
-        self,
-        resource_type: str,
-        agents: list,
-    ) -> dict:
-        """Review resource availability across agents."""
+    @authority_guard("ops.map_requirements")
+    def map_requirements(self, client_id: str, requirements: list) -> dict:
+        """Map requirements to packages."""
         return {
-            "resource_type": resource_type,
-            "agents": agents,
-            "availability": {a: "available" for a in agents},
-            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SAN-{uuid.uuid4().hex[:6].upper()}",
+            "client_id": client_id,
+            "requirements": requirements,
+            "action": "map_requirements",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.report_consolidation")
-    def report_consolidation(
-        self,
-        period: str,
-        consolidations: list,
-        summary: dict,
-    ) -> dict:
-        """Generate a consolidation report for a period."""
-        report_id = f"RPT-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.flag_missing_requirement")
+    def flag_missing_requirement(self, client_id: str, requirement: str) -> dict:
+        """Flag a missing requirement."""
         return {
-            "report_id": report_id,
-            "period": period,
-            "consolidations": consolidations,
-            "summary": summary,
-            "status": "generated",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SAN-{uuid.uuid4().hex[:6].upper()}",
+            "client_id": client_id,
+            "requirement": requirement,
+            "action": "flag_missing_requirement",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.escalate_consolidation_issue")
-    def escalate_consolidation_issue(
-        self,
-        issue_type: str,
-        description: str,
-        severity: str,
-        affected_resources: list,
-    ) -> dict:
-        """Escalate a consolidation issue to human Board."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.escalate_scope_gap")
+    def escalate_scope_gap(self, client_id: str, gap: str) -> dict:
+        """Escalate a scope gap."""
         return {
-            "incident_id": incident_id,
-            "issue_type": issue_type,
-            "description": description,
-            "severity": severity,
-            "affected_resources": affected_resources,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SAN-{uuid.uuid4().hex[:6].upper()}",
+            "client_id": client_id,
+            "gap": gap,
+            "action": "escalate_scope_gap",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    def list_consolidations(
-        self,
-        resource_type: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List consolidation records (read-only)."""
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
+
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
         return {
-            "consolidations": [],
+            "records": [],
             "count": 0,
-            "filter": {"resource_type": resource_type, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_availability_status(
-        self,
-        resource_type: str | None = None,
-    ) -> dict:
-        """Get availability status (read-only)."""
-        return {
-            "resources": [],
-            "count": 0,
-            "filter": {"resource_type": resource_type},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def list_capacity_aggregates(
-        self,
-        resource_type: str | None = None,
-    ) -> dict:
-        """List capacity aggregates (read-only)."""
-        return {
-            "aggregates": [],
-            "count": 0,
-            "filter": {"resource_type": resource_type},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -239,5 +210,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

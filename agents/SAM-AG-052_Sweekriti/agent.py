@@ -1,8 +1,12 @@
-"""Sweekriti — Client Appreciation Agent (SAM-AG-052).
+"""Sweekriti — Client Approval (SAM-AG-052 · CEX-010).
 
-Phase 3 Client Experience agent. Owns client appreciation: send appreciation
-messages, track appreciation, report appreciation status, and escalation of
-appreciation issues. Reports to Mitra (SAM-AG-004).
+Stage 2 Phase 3 operations, client, analytics and CEO-office agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Run client approval and sign-off: build the approval request with its evidence, track
+versions, route revision feedback, and record the decision made by the human approver.
+Nothing is released without sign-off. [PDF 01A.04 · CEX-010 Client Approval & Sign-off;
+processes CEX-P14]
+Reports to Mitra (AI CXO, SAM-AG-004).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -14,60 +18,73 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Sweekriti(BaseAgent):
-    """Client Appreciation Agent."""
+    """Client Approval."""
 
     canonical_id = "SAM-AG-052"
     name = "Sweekriti"
-    designation = "Client Appreciation Agent"
+    designation = "Client Approval"
     agent_type = "thinking"
+    REQUIRED_CHECKS = ("shuddhi", "pariksha", "gunvatta", "swasthya", "gopniya")
 
     AUTHORITY = {
-        "cex.appreciate_client": True,
-        "cex.send_appreciation": True,
-        "cex.track_appreciation": True,
-        "cex.report_appreciation": True,
-        "cex.escalate_appreciation_issue": True,
-        "tec.grant_access": False,
+        "cex.build_approval_request": True,
+        "cex.record_client_decision": True,
+        "cex.track_version": True,
+        "cex.route_revision_feedback": True,
+        "cex.escalate_approval_delay": True,
         "gov.certify": False,
         "gov.modify_finding": False,
+        "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Sweekriti, the Client Appreciation Agent (SAM-AG-052 · CEX-006) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "build_approval_request": "cex.build_approval_request",
+        "record_client_decision": "cex.record_client_decision",
+        "track_version": "cex.track_version",
+        "route_revision_feedback": "cex.route_revision_feedback",
+        "escalate_approval_delay": "cex.escalate_approval_delay",
+    }
+
+    SYSTEM_PROMPT = """You are Sweekriti, Client Approval (SAM-AG-052 · CEX-010) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-052 · Position: CEX-006 · Legacy: SAM-EX-052
-- You report to Mitra (AI Chief Client Experience Officer, SAM-AG-004).
+- Canonical ID: SAM-AG-052 · Position: CEX-010 · Department: Client Experience & Account Management
+- You report to Mitra (AI CXO, SAM-AG-004).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
-  Satya does NOT report to you and you cannot alter Satya's findings.
 
 YOUR MISSION
-Own client appreciation: send appreciation messages, track appreciation
-engagement, report appreciation metrics, and escalate appreciation issues.
-Every appreciation must be genuine, timely and personalised. Never fabricate
-appreciation records or engagement data.
+Run client approval and sign-off: build the approval request with its evidence, track versions,
+route revision feedback, and record the decision made by the human approver. Nothing is released
+without sign-off. [PDF 01A.04 · CEX-010 Client Approval & Sign-off; processes CEX-P14]
 
-YOUR FIVE REGISTERS
-1. Appreciation Register — appreciation events, occasions, status per client
-2. Appreciation Message Register — messages sent, channels, content
-3. Appreciation Tracking Register — delivery, acknowledgment, engagement
-4. Appreciation Report Register — metrics, frequency, satisfaction impact
-5. Appreciation Escalation Register — failed appreciations, escalations
+YOUR REGISTERS
+1. Approval Request Register — content, evidence, approver, status
+2. Version Register — item, version, change, date
+3. Sign-off Evidence Register — decision, approver, timestamp
+
+AUTHORITY MATRIX
+cex.build_approval_request · cex.record_client_decision · cex.track_version · cex.route_revision_feedback · cex.escalate_approval_delay
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never fabricate appreciation records or engagement metrics. Missing = "unavailable".
-2. Never send appreciation outside approved occasions — route to human.
-3. Never suppress a failed appreciation to improve your score.
-4. Respect tenant isolation — never cross-client appreciation leakage.
-5. Satya's findings are immutable to you — read-only.
-6. Every appreciation has a timestamp and delivery record.
-7. If the local model is down, report it honestly — do not fake output."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. You never approve content yourself — only a named human approver can.
+5. Never send an approval request while required evidence is missing.
+6. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "appreciate")
+        action = kwargs.get("action", "approval")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -90,7 +107,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="cex.appreciation",
+                event_type="cex.approval",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -105,129 +122,81 @@ HARD RULES — NEVER VIOLATE
     # Sweekriti's tools (authority-guarded)
     # ------------------------------------------------------------------
 
-    @authority_guard("cex.appreciate_client")
-    def appreciate_client(
-        self,
-        client_id: str,
-        occasion: str,
-        reason: str,
-    ) -> dict:
-        """Initiate client appreciation."""
-        appreciation_id = f"APP-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("cex.build_approval_request")
+    def build_approval_request(self, content_ref: str, evidence: dict) -> dict:
+        """Build an approval request; blocks if evidence is missing."""
+        missing = [c for c in self.REQUIRED_CHECKS if not (evidence or {}).get(c)]
         return {
-            "appreciation_id": appreciation_id,
-            "client_id": client_id,
-            "occasion": occasion,
-            "reason": reason,
-            "status": "initiated",
-            "initiated_at": datetime.now(timezone.utc).isoformat(),
+            "request_id": f"APRQ-{uuid.uuid4().hex[:6].upper()}",
+            "content_ref": content_ref,
+            "evidence": evidence,
+            "missing_evidence": missing,
+            "status": "ready_for_human_approval" if not missing else "blocked_missing_evidence",
+            "built_at": _now(),
         }
 
-    @authority_guard("cex.send_appreciation")
-    def send_appreciation(
-        self,
-        client_id: str,
-        channel: str,
-        message: str,
-        gift: str | None = None,
-    ) -> dict:
-        """Send an appreciation message to a client."""
-        message_id = f"MSG-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("cex.record_client_decision")
+    def record_client_decision(self, request_id: str, decision: str, approver: str) -> dict:
+        """Record a decision made by a human approver."""
+        if not approver:
+            raise ValueError("A client decision must name the human approver; agents cannot approve.")
+        if decision not in ("approve", "reject", "approve_with_changes"):
+            raise ValueError(f"Unknown decision: {decision}")
         return {
-            "message_id": message_id,
-            "client_id": client_id,
-            "channel": channel,
-            "message": message,
-            "gift": gift,
-            "status": "sent",
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "request_id": request_id,
+            "decision": decision,
+            "approver": approver,
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("cex.track_appreciation")
-    def track_appreciation(
-        self,
-        appreciation_id: str,
-    ) -> dict:
-        """Track appreciation status for a client."""
+    @authority_guard("cex.track_version")
+    def track_version(self, item_ref: str, version: str) -> dict:
+        """Track a content version."""
         return {
-            "appreciation_id": appreciation_id,
-            "delivery_status": "unknown",
-            "acknowledged": False,
-            "engagement": "unknown",
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SWE-{uuid.uuid4().hex[:6].upper()}",
+            "item_ref": item_ref,
+            "version": version,
+            "action": "track_version",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("cex.report_appreciation")
-    def report_appreciation(
-        self,
-        period: str,
-        appreciated_clients: list,
-        pending_appreciations: list,
-    ) -> dict:
-        """Generate appreciation status report."""
-        report_id = f"RPT-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("cex.route_revision_feedback")
+    def route_revision_feedback(self, item_ref: str, feedback: str) -> dict:
+        """Send client feedback to the producing team."""
         return {
-            "report_id": report_id,
-            "period": period,
-            "appreciated_clients": len(appreciated_clients),
-            "pending_appreciations": len(pending_appreciations),
-            "engagement_rate": "0%",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SWE-{uuid.uuid4().hex[:6].upper()}",
+            "item_ref": item_ref,
+            "feedback": feedback,
+            "action": "route_revision_feedback",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("cex.escalate_appreciation_issue")
-    def escalate_appreciation_issue(
-        self,
-        client_id: str,
-        severity: str,
-        description: str,
-        failed_appreciations: list,
-    ) -> dict:
-        """Escalate an appreciation issue to human."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("cex.escalate_approval_delay")
+    def escalate_approval_delay(self, request_id: str, days_waiting: int) -> dict:
+        """Escalate a delayed approval."""
         return {
-            "incident_id": incident_id,
-            "client_id": client_id,
-            "severity": severity,
-            "description": description,
-            "failed_appreciations": failed_appreciations,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"SWE-{uuid.uuid4().hex[:6].upper()}",
+            "request_id": request_id,
+            "days_waiting": days_waiting,
+            "action": "escalate_approval_delay",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    def list_appreciations(
-        self,
-        client_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List appreciation records (read-only)."""
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
+
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
         return {
-            "appreciations": [],
+            "records": [],
             "count": 0,
-            "filter": {"client_id": client_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_appreciation_status(
-        self,
-        client_id: str,
-    ) -> dict:
-        """Get appreciation status for a client (read-only)."""
-        return {
-            "client_id": client_id,
-            "appreciation": {},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_appreciation_metrics(
-        self,
-        period: str | None = None,
-    ) -> dict:
-        """Get appreciation metrics (read-only)."""
-        return {
-            "period": period,
-            "metrics": {},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -242,5 +211,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

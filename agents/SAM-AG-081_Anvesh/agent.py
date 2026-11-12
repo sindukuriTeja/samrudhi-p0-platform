@@ -1,4 +1,4 @@
-"""Anvesh — Healthcare Research Agent (SAM-AG-081).
+"""Anvesh — Healthcare Content Research (SAM-AG-081).
 
 Phase 2 content pilot agent. Owns healthcare research: gathers validated
 facts, source citations, and clinical references for content production.
@@ -16,11 +16,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Anvesh(BaseAgent):
-    """Healthcare Research Agent."""
+    """Healthcare Content Research."""
 
     canonical_id = "SAM-AG-081"
     name = "Anvesh"
-    designation = "Healthcare Research Agent"
+    designation = "Healthcare Content Research"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,11 +34,11 @@ class Anvesh(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Anvesh, the Healthcare Research Agent (SAM-AG-081 · CRT-016) of Samrudhi,
+    SYSTEM_PROMPT = """You are Anvesh, Healthcare Content Research (SAM-AG-081 · CRT-007) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-081 · Position: CRT-016
+- Canonical ID: SAM-AG-081 · Position: CRT-007
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 

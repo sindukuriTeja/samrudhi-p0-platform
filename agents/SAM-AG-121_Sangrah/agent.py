@@ -1,4 +1,4 @@
-"""Sangrah — Data Collection Agent (SAM-AG-121).
+"""Sangrah — Data Ingestion (SAM-AG-121).
 
 Phase 3 analytics/data agent. Owns data collection: collects data from sources,
 fetches from external sources, stores collected data, tracks collection status,
@@ -16,11 +16,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Sangrah(BaseAgent):
-    """Data Collection Agent."""
+    """Data Ingestion."""
 
     canonical_id = "SAM-AG-121"
     name = "Sangrah"
-    designation = "Data Collection Agent"
+    designation = "Data Ingestion"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,11 +34,11 @@ class Sangrah(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Sangrah, the Data Collection Agent (SAM-AG-121 · DAT-005) of Samrudhi,
+    SYSTEM_PROMPT = """You are Sangrah, Data Ingestion (SAM-AG-121 · DAT-007) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-121 · Position: DAT-005
+- Canonical ID: SAM-AG-121 · Position: DAT-007
 - You report to Medha (AI Head of Analytics, SAM-AG-009).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 

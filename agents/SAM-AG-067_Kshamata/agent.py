@@ -1,4 +1,4 @@
-"""Kshamata — Capacity Management Agent (SAM-AG-067 · OPS-009).
+"""Kshamata — Agent Capacity (SAM-AG-067 · OPS-010).
 
 Phase 3 operations agent. Manages capacity, tracks capacity usage, forecasts
 capacity, and reports capacity status. Reports to Daksh (SAM-AG-002, AI COO).
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Kshamata(BaseAgent):
-    """Capacity Management Agent."""
+    """Agent Capacity."""
 
     canonical_id = "SAM-AG-067"
     name = "Kshamata"
-    designation = "Capacity Management Agent"
+    designation = "Agent Capacity"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -33,11 +33,11 @@ class Kshamata(BaseAgent):
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Kshamata, the Capacity Management Agent (SAM-AG-067 · OPS-009) of Samrudhi,
+    SYSTEM_PROMPT = """You are Kshamata, Agent Capacity (SAM-AG-067 · OPS-010) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-067 · Position: OPS-009
+- Canonical ID: SAM-AG-067 · Position: OPS-010
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
   Satya does NOT report to you and you cannot alter Satya's findings.

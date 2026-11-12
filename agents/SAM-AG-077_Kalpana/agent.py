@@ -1,4 +1,4 @@
-"""Kalpana — Editorial Planning Agent (SAM-AG-077).
+"""Kalpana — Editorial Planning Lead (SAM-AG-077).
 
 Phase 2 content pilot agent. Owns editorial planning under Aarya:
 builds editorial calendars, plans content schedules, coordinates deadlines.
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Kalpana(BaseAgent):
-    """Editorial Planning Agent."""
+    """Editorial Planning Lead."""
 
     canonical_id = "SAM-AG-077"
     name = "Kalpana"
-    designation = "Editorial Planning Agent"
+    designation = "Editorial Planning Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -33,11 +33,11 @@ class Kalpana(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Kalpana, the Editorial Planning Agent (SAM-AG-077 · CRT-021) of Samrudhi,
+    SYSTEM_PROMPT = """You are Kalpana, Editorial Planning Lead (SAM-AG-077 · CRT-003) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-077 · Position: CRT-021
+- Canonical ID: SAM-AG-077 · Position: CRT-003
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 

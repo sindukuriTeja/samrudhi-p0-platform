@@ -1,4 +1,4 @@
-"""Prakash — Healthcare Publishing Agent (SAM-AG-084).
+"""Prakash — Content Publishing (SAM-AG-084).
 
 Phase 2 content pilot agent. Owns healthcare content publishing:
 publishes approved content to channels, tracks publishing status, manages release.
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Prakash(BaseAgent):
-    """Healthcare Publishing Agent."""
+    """Content Publishing."""
 
     canonical_id = "SAM-AG-084"
     name = "Prakash"
-    designation = "Healthcare Publishing Agent"
+    designation = "Content Publishing"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -32,11 +32,11 @@ class Prakash(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Prakash, the Healthcare Publishing Agent (SAM-AG-084 · CRT-019) of Samrudhi,
+    SYSTEM_PROMPT = """You are Prakash, Content Publishing (SAM-AG-084 · CRT-010) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-084 · Position: CRT-019
+- Canonical ID: SAM-AG-084 · Position: CRT-010
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
