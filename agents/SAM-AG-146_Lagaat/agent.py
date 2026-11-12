@@ -31,6 +31,7 @@ class Lagaat(BaseAgent):
     agent_type = "thinking"
 
     AUTHORITY = {
+        "fin.summarise_run_cost": True,
         "fin.compute_cost_per_deliverable": True,
         "fin.attribute_run_cost": True,
         "fin.record_vendor_cost": True,
@@ -43,6 +44,7 @@ class Lagaat(BaseAgent):
 
     # tool method -> permission it requires (checked by the authority guard)
     TOOLS = {
+        "summarise_run_cost": "fin.summarise_run_cost",
         "compute_cost_per_deliverable": "fin.compute_cost_per_deliverable",
         "attribute_run_cost": "fin.attribute_run_cost",
         "record_vendor_cost": "fin.record_vendor_cost",
@@ -69,7 +71,7 @@ YOUR REGISTERS
 3. Vendor Cost Register — vendor, subscription, cost
 
 AUTHORITY MATRIX
-fin.compute_cost_per_deliverable · fin.attribute_run_cost · fin.record_vendor_cost · fin.report_service_cost · fin.escalate_cost_overrun
+fin.summarise_run_cost · fin.compute_cost_per_deliverable · fin.attribute_run_cost · fin.record_vendor_cost · fin.report_service_cost · fin.escalate_cost_overrun
 gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
@@ -118,6 +120,25 @@ HARD RULES — NEVER VIOLATE
     # ------------------------------------------------------------------
     # Lagaat's tools (authority-guarded)
     # ------------------------------------------------------------------
+
+    @authority_guard("fin.summarise_run_cost")
+    def summarise_run_cost(self, tokens: int, steps: int, accepted_deliverables: int, cost_per_1k_tokens: float = None) -> dict:
+        """Summarise model usage and cost for a project."""
+        if cost_per_1k_tokens is None:
+            cost, note = None, "No cost rate configured (project_flows.yaml defaults.cost_per_1k_tokens); cost unavailable."
+        else:
+            cost, note = round(tokens / 1000.0 * float(cost_per_1k_tokens), 4), "Model cost only; human review time not included."
+        per = round(cost / accepted_deliverables, 4) if cost is not None and accepted_deliverables > 0 else None
+        return {
+            "model_steps": steps,
+            "tokens": tokens,
+            "accepted_deliverables": accepted_deliverables,
+            "total_cost": cost if cost is not None else "unavailable",
+            "cost_per_accepted_deliverable": per if per is not None else "unavailable",
+            "note": note,
+            "status": "computed" if per is not None else "partial",
+            "computed_at": _now(),
+        }
 
     @authority_guard("fin.compute_cost_per_deliverable")
     def compute_cost_per_deliverable(self, total_cost: float, accepted_deliverables: int) -> dict:

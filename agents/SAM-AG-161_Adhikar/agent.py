@@ -3,6 +3,8 @@
 Stage 1B service-first agent. Enforces what each agent may use; manages credentials.
 Service-first: permission enforcement layer (wraps authority guard).
 """
+from datetime import datetime, timezone
+
 from agents.base import BaseAgent, AgentResult, register_agent
 from backend.core.authority import check_authority, AuthorityError
 from backend.core.authority import authority_guard
@@ -55,3 +57,31 @@ class Adhikar(BaseAgent):
     @authority_guard("tec.audit_access")
     def audit(self, agent_id: str) -> dict:
         return {"agent_id": agent_id, "audit": "permission checks are logged to execution_log per run"}
+
+    @authority_guard("tec.check_permission")
+    def check_many(self, pairs: list) -> dict:
+        """Check a list of [agent_id, permission] pairs against the authority matrices."""
+        from backend.core.authority import load_authority_matrix
+        results = []
+        for agent_id, permission in pairs or []:
+            allowed = bool(load_authority_matrix(agent_id).get(permission, False))
+            results.append({"agent_id": agent_id, "permission": permission, "allowed": allowed})
+        denied = [r for r in results if not r["allowed"]]
+        return {"checked": len(results), "denied": denied,
+                "status": "ready" if not denied else "permission_missing",
+                "checked_at": datetime.now(timezone.utc).isoformat()}
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
+        }

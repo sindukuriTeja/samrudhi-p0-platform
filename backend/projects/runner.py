@@ -1,37 +1,48 @@
 """Project runner — a thin layer over the existing agents.
 
-It walks the steps of a project flow (config/project_flows.yaml) in order and,
-for each step:
+It walks the documented chain (config/project_flows.yaml) in order. For each step:
   1. refuses to run an agent that is not Active (lifecycle state active/monitored)
   2. checks the step's permission with the existing authority guard
-  3. dispatches the existing Celery task workers.tasks.run_agent_task
-  4. stores a readable version of the result in the project conversation
-  5. asks for a human decision (approvals table) when the flow says so
+  3. runs the step:
+       think - dispatches the existing Celery task workers.tasks.run_agent_task
+       tool  - calls the agent's own authority-guarded tool in code and logs it
+       skip  - records why the step has nothing real to work on
+  4. stores the result: a readable message, and a structured result for later steps
+  5. applies the documented control flow: checker send-backs (rework rounds through
+     Punargathan with a round limit) and human gates (approvals table)
 
-It contains no agent logic and never calls the model directly. Human
-decisions are written only by the API endpoint for a signed-in user.
+It contains no agent logic and never calls the model directly. Human decisions are
+written only by the API endpoint for a signed-in user.
 """
 import asyncio
+import json
 import logging
+import re
+import uuid
 
 from sqlalchemy import func, select, update
 
 from backend.core.authority import AuthorityError, check_authority
 from backend.core.message_bus import BusEnvelope, bus
 from backend.database import async_session_maker
-from backend.models import Agent, Approval
+from backend.models import Agent, Approval, ExecutionLog
 from backend.models.projects import ApprovalDecision, Project, ProjectMessage, ProjectStep
 from backend.projects import dispatch as dispatcher
 from backend.projects.common import (
     ENDED_PROJECT_STATES, RUNNABLE_STATES, new_approval_id, utcnow,
 )
 from backend.projects.events import notify, redis_alive
-from backend.projects.flow import get_flow, revise_permission_for, step_def
+from backend.projects.flow import (
+    chain_permissions, checks_between, get_flow, required_agents, running_steps,
+    step_def, step_permission,
+)
 from backend.projects.readable import one_line, readable
 
 log = logging.getLogger("samrudhi.projects")
 
 MODEL_UNAVAILABLE = "[MODEL UNAVAILABLE]"
+INPUT_CHARS = 800
+VERDICT_RE = re.compile(r"VERDICT\s*[:\-]\s*(PASS|SEND[\s\-]*BACK)\b[\s:\-–—]*(.*)", re.I | re.S)
 
 
 class ProjectError(Exception):
@@ -79,14 +90,13 @@ async def open_issues(s, pid: str) -> list[ProjectStep]:
     for i, st in enumerate(steps):
         if st.status not in ("in_progress", "needs_attention"):
             continue
-        superseded = any(o.step_key == st.step_key for o in steps[i + 1:])
-        if not superseded:
+        if not any(o.step_key == st.step_key for o in steps[i + 1:]):
             issues.append(st)
     return issues
 
 
 async def _insert_rounds(s, pid: str, after_seq: int, step_keys: list[str], flow: dict,
-                         source_approval_id: str | None) -> list[ProjectStep]:
+                         source_approval_id: str | None, prefill: dict | None = None) -> list[ProjectStep]:
     """Insert new rounds of the given step keys right after after_seq. Earlier rounds are kept."""
     n = len(step_keys)
     await s.execute(
@@ -105,10 +115,131 @@ async def _insert_rounds(s, pid: str, after_seq: int, step_keys: list[str], flow
             project_id=pid, seq=after_seq + i, step_key=key, agent_id=d["agent"],
             responsibility=d["responsibility"], tag=d["tag"], round=max_round + 1,
             status="queued", source_approval_id=source_approval_id,
+            result_json=dict((prefill or {}).get(key) or {}) or None,
         )
         s.add(st)
         created.append(st)
     return created
+
+
+async def _latest(s, pid: str, key: str, completed_only: bool = True) -> ProjectStep | None:
+    q = select(ProjectStep).where(ProjectStep.project_id == pid, ProjectStep.step_key == key)
+    if completed_only:
+        q = q.where(ProjectStep.status == "completed")
+    return (await s.execute(q.order_by(ProjectStep.seq.desc()).limit(1))).scalars().first()
+
+
+async def _output(s, pid: str, key: str) -> str:
+    st = await _latest(s, pid, key)
+    if st is None:
+        return ""
+    msg = (await s.execute(select(ProjectMessage).where(
+        ProjectMessage.step_id == st.id, ProjectMessage.author_type == "agent"
+    ).order_by(ProjectMessage.id.desc()).limit(1))).scalars().first()
+    return msg.text if msg else ""
+
+
+async def _human_texts(s, pid: str) -> list[str]:
+    rows = (await s.execute(select(ProjectMessage).where(
+        ProjectMessage.project_id == pid, ProjectMessage.author_type == "human",
+        ProjectMessage.kind.in_(("start", "message")),
+    ).order_by(ProjectMessage.created_at, ProjectMessage.id))).scalars().all()
+    return [m.text for m in rows]
+
+
+def _scope(flow: dict, human_texts: list[str]) -> dict:
+    scope = dict((flow.get("defaults") or {}).get("scope") or {"social_posts": 3})
+    for text in human_texts:
+        m = re.search(r"\b(\d{1,2})\s+(?:short\s+|simple\s+|social\s+(?:media\s+)?)*posts?\b", text, re.I)
+        if m:
+            scope["social_posts"] = int(m.group(1))
+    return scope
+
+
+def _passed(st: ProjectStep | None) -> bool:
+    return bool(st is not None and st.status == "completed" and (st.result_json or {}).get("_passed", True))
+
+
+async def _checks(s, pid: str, flow: dict) -> dict:
+    required = (flow.get("defaults") or {}).get("required_checks") or []
+    out = {}
+    for key in required:
+        st = await _latest(s, pid, key, completed_only=False)
+        out[key] = _passed(st)
+    return out
+
+
+async def _resolve(value, s, p: Project, step: ProjectStep, flow: dict):
+    if isinstance(value, dict):
+        return {k: await _resolve(v, s, p, step, flow) for k, v in value.items()}
+    if isinstance(value, list):
+        return [await _resolve(v, s, p, step, flow) for v in value]
+    if not isinstance(value, str) or not value.startswith("$"):
+        return value
+    defaults = flow.get("defaults") or {}
+    name = value[1:]
+    if name.startswith("result:"):
+        key, _, field = name[len("result:"):].partition(".")
+        st = await _latest(s, p.id, key)
+        return ((st.result_json or {}) if st else {}).get(field)
+    if name.startswith("output:"):
+        return await _output(s, p.id, name[len("output:"):])
+    if name == "project_id":
+        return p.id
+    if name == "project_name":
+        return p.name
+    if name == "client_id":
+        return p.client_id
+    if name == "today":
+        return utcnow().date().isoformat()
+    if name == "scope":
+        return _scope(flow, await _human_texts(s, p.id))
+    if name == "active_agents":
+        return list((await s.execute(select(Agent.canonical_id).where(
+            Agent.status.in_(RUNNABLE_STATES)))).scalars().all())
+    if name == "chain_permissions":
+        return chain_permissions(flow)
+    if name == "chain_steps":
+        names = await _agent_names(s)
+        return [f"{names.get(d['agent'], d['agent'])} · {d['tag']}" for d in flow["steps"]]
+    if name == "checks":
+        return await _checks(s, p.id, flow)
+    if name == "tokens_total":
+        return int((await s.execute(select(func.coalesce(func.sum(ExecutionLog.tokens_used), 0)).where(
+            ExecutionLog.workflow_id == p.id))).scalar() or 0)
+    if name == "model_steps":
+        return int((await s.execute(select(func.count()).select_from(ExecutionLog).where(
+            ExecutionLog.workflow_id == p.id, ExecutionLog.tokens_used > 0))).scalar() or 0)
+    if name == "accepted_deliverables":
+        gate = await _latest(s, p.id, "sweekriti")
+        if gate is None or not gate.approval_id:
+            return 0
+        dec = (await s.execute(select(ApprovalDecision).where(
+            ApprovalDecision.request_id == gate.approval_id))).scalars().first()
+        if dec is None or dec.decision == "reject":
+            return 0
+        return sum(int(v) for v in _scope(flow, await _human_texts(s, p.id)).values())
+    if name in ("send_back_reasons", "rework_round"):
+        rj = step.result_json or {}
+        return rj.get("pending_reasons", []) if name == "send_back_reasons" else rj.get("round", 1)
+    if name in defaults:
+        return defaults[name]
+    return value
+
+
+async def _decide_pass(d: dict, result: dict) -> bool:
+    cond = d.get("pass_if")
+    if not cond:
+        return True
+    return all(result.get(k) == v for k, v in cond.items())
+
+
+def _fail_reasons(result: dict) -> list[str]:
+    for k in ("flags", "findings", "missing_checks", "missing", "missing_evidence", "defects", "denied", "unassigned"):
+        v = result.get(k)
+        if v:
+            return [json.dumps(x) if isinstance(x, dict) else str(x) for x in v]
+    return [str(result.get("status", "did not pass"))]
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +268,7 @@ class ProjectRunner:
         try:
             if resume_step_id is not None and resume_ref:
                 result = await dispatcher.wait_celery(resume_ref, pending_timeout=120)
-                if not await self._finish(pid, resume_step_id, result):
+                if not await self._finish_think(pid, resume_step_id, result):
                     return
             while await self._advance(pid):
                 pass
@@ -152,6 +283,17 @@ class ProjectRunner:
                     s.add(_sys_msg(pid, f"The project runner hit an error and paused the project: {e}", "error"))
                     await s.commit()
             await notify("project", pid)
+
+    async def _block(self, s, p: Project, st: ProjectStep, error: str) -> bool:
+        st.status = "needs_attention"
+        st.error = error
+        st.ended_at = utcnow()
+        if p.status == "running":
+            p.status = "needs_attention"
+        s.add(_sys_msg(p.id, error, "error", st.id))
+        await s.commit()
+        await notify("project", p.id)
+        return False
 
     async def _advance(self, pid: str) -> bool:
         """Run the next queued step. Returns True if the loop should continue."""
@@ -178,46 +320,46 @@ class ProjectRunner:
                 await notify("project", pid)
                 return False
 
-            agent = (await s.execute(
-                select(Agent).where(Agent.canonical_id == step.agent_id))).scalars().first()
-            d = step_def(flow, step.step_key) or {}
-            agent_name = agent.name if agent else step.agent_id
+            d = step_def(flow, step.step_key) or {"mode": "think", "tag": step.tag}
+            mode = d.get("mode", "think")
+            names = await _agent_names(s)
+            agent_name = names.get(step.agent_id, step.agent_id)
 
+            if mode == "skip":
+                step.status = "skipped"
+                step.started_at = step.ended_at = utcnow()
+                step.summary = d.get("reason", "Skipped.")
+                s.add(_sys_msg(pid, f"{agent_name} · {d['tag']}: skipped. {step.summary}", "skipped", step.id))
+                await s.commit()
+                await notify("project", pid)
+                return True
+
+            agent = (await s.execute(select(Agent).where(Agent.canonical_id == step.agent_id))).scalars().first()
             # Rule: an agent that is not Active must not run.
             if agent is None or agent.status not in RUNNABLE_STATES:
                 state = agent.status if agent else "not registered"
-                step.status = "needs_attention"
-                step.error = (f"{agent_name} is not Active (state: {state}), so it was not run. "
-                              f"Activate it on its agent page, then press Retry.")
-                step.ended_at = utcnow()
-                p.status = "needs_attention"
-                s.add(_sys_msg(pid, step.error, "error", step.id))
-                await s.commit()
-                await notify("project", pid)
-                return False
+                return await self._block(s, p, step, (
+                    f"{agent_name} is not Active (state: {state}), so it was not run. "
+                    f"Activate it on its agent page, then press Retry."))
 
             # Rule: permissions are enforced in code by the authority guard.
-            permission = d.get("permission")
-            if step.source_approval_id:
-                permission = revise_permission_for(flow, step.step_key) or permission
+            permission = step_permission(d, step.round)
             try:
                 if permission:
                     check_authority(step.agent_id, permission)
             except AuthorityError:
-                step.status = "needs_attention"
-                step.error = f"Blocked by the authority guard: {agent_name} may not perform '{permission}'."
-                step.ended_at = utcnow()
-                p.status = "needs_attention"
-                s.add(_sys_msg(pid, step.error, "error", step.id))
-                await s.commit()
-                await notify("project", pid)
-                return False
+                return await self._block(s, p, step, (
+                    f"Blocked by the authority guard: {agent_name} may not perform '{permission}'."))
 
-            task_text, context = await self._build_task(s, p, step, d)
             step.status = "in_progress"
             step.started_at = utcnow()
             step.ended_at = None
             step.error = None
+
+            if mode == "tool":
+                return await self._run_tool(s, p, step, d, flow)
+
+            task_text, context = await self._build_task(s, p, step, d)
             await s.commit()
             step_id = step.id
             args = [step.agent_id, task_text, p.client_id, p.id]
@@ -232,57 +374,72 @@ class ProjectRunner:
                     await s2.commit()
 
         result = await dispatcher.dispatch(args, kwargs, _on_ref)
-        return await self._finish(pid, step_id, result)
+        return await self._finish_think(pid, step_id, result)
 
     async def _build_task(self, s, p: Project, step: ProjectStep, d: dict) -> tuple[str, dict]:
         names = await _agent_names(s)
-        humans = (await s.execute(
-            select(ProjectMessage).where(
-                ProjectMessage.project_id == p.id, ProjectMessage.author_type == "human",
-                ProjectMessage.kind.in_(("start", "message")),
-            ).order_by(ProjectMessage.created_at, ProjectMessage.id)
-        )).scalars().all()
-        done = (await s.execute(
-            select(ProjectStep, ProjectMessage)
-            .join(ProjectMessage, ProjectMessage.step_id == ProjectStep.id)
-            .where(ProjectStep.project_id == p.id, ProjectMessage.author_type == "agent")
-            .order_by(ProjectStep.seq)
-        )).all()
-        previous = [
-            {
-                "agent": names.get(st.agent_id, st.agent_id),
-                "step": f"{st.tag} · round {st.round}" if st.round > 1 else st.tag,
-                "result": (m.text[:700] + "…") if len(m.text) > 700 else m.text,
-            }
-            # Kept short: agents put this context into their prompt, and the local 7B model
-            # must answer within the agent's own 120 s timeout.
-            for st, m in done[-4:]
-        ]
-        note = None
-        if step.source_approval_id:
+        humans = await _human_texts(s, p.id)
+        handed_over = []
+        for key in d.get("inputs") or []:
+            text = await _output(s, p.id, key)
+            if text:
+                src = await _latest(s, p.id, key)
+                handed_over.append({
+                    "from": names.get(src.agent_id, src.agent_id) if src else key,
+                    "step": (step_def(get_flow(p.flow_key), key) or {}).get("tag", key),
+                    "result": (text[:INPUT_CHARS] + "…") if len(text) > INPUT_CHARS else text,
+                })
+        note = (step.result_json or {}).get("revision_note")
+        if step.source_approval_id and not note:
             dec = (await s.execute(select(ApprovalDecision).where(
                 ApprovalDecision.request_id == step.source_approval_id))).scalars().first()
             note = dec.note if dec else None
+        previous_own = await _output(s, p.id, step.step_key) if step.round > 1 else ""
 
         parts = [d.get("instruction", "").strip(), f"Project: {p.name}."]
         if humans:
-            parts.append("Instructions from the human team: " + " | ".join(h.text for h in humans))
+            parts.append("Instructions from the human team: " + " | ".join(humans))
         if note:
-            parts.append(f"Revise the earlier work using this note from the human reviewer: {note}")
+            parts.append(f"This is round {step.round}. Revise your earlier work using this feedback: {note}")
+        if d.get("verdict"):
+            parts.append("End your answer with one final line: VERDICT: PASS, or VERDICT: SEND BACK - <short reasons>.")
         context = {
-            "project_id": p.id,
-            "project": p.name,
-            "client_id": p.client_id,
-            "workflow_stage": d.get("stage"),
-            "round": step.round,
-            "human_instructions": [h.text for h in humans],
-            "previous_work": previous,
+            "project_id": p.id, "project": p.name, "client_id": p.client_id,
+            "step": d.get("tag"), "round": step.round,
+            "human_instructions": humans, "handed_over": handed_over,
         }
+        if previous_own:
+            context["your_previous_round"] = previous_own[:INPUT_CHARS]
         if note:
             context["revision_note"] = note
         return "\n".join(x for x in parts if x), context
 
-    async def _finish(self, pid: str, step_id: int, result: dict) -> bool:
+    async def _run_tool(self, s, p: Project, step: ProjectStep, d: dict, flow: dict) -> bool:
+        from agents.base import get_agent_module
+        args = await _resolve(d.get("args") or {}, s, p, step, flow)
+        started = utcnow()
+        try:
+            result = getattr(get_agent_module(step.agent_id), d["method"])(**args)
+            error = None
+        except AuthorityError as e:
+            result, error = None, f"Blocked by the authority guard: {e}"
+        except Exception as e:
+            result, error = None, f"{d['tag']} failed: {e}"
+        execution_id = f"exec-{uuid.uuid4().hex[:12]}"
+        s.add(ExecutionLog(
+            execution_id=execution_id, agent_id=step.agent_id, workflow_id=p.id,
+            task=f"{d['tag']} ({d['method']})", tenant_id=p.client_id,
+            status="completed" if error is None else "failed", tokens_used=0,
+            started_at=started, ended_at=utcnow(), trace_id=uuid.uuid4().hex[:12],
+            error=error, raw_result=result if isinstance(result, dict) else None,
+        ))
+        step.execution_id = execution_id
+        if error:
+            return await self._block(s, p, step, error)
+        return await self._complete(s, p, step, d, flow, result, json.dumps(result, default=str),
+                                    passed=await _decide_pass(d, result))
+
+    async def _finish_think(self, pid: str, step_id: int, result: dict) -> bool:
         output = result.get("output") if isinstance(result, dict) else None
         status = result.get("status") if isinstance(result, dict) else "failed"
         err = None
@@ -302,46 +459,98 @@ class ProjectRunner:
             if p is None or st is None:
                 return False
             st.execution_id = result.get("execution_id") if isinstance(result, dict) else None
-            st.ended_at = utcnow()
             flow = get_flow(p.flow_key)
             d = step_def(flow, st.step_key) or {}
-
             if err:
-                st.status = "needs_attention"
-                st.error = err
-                if p.status == "running":
-                    p.status = "needs_attention"
-                s.add(_sys_msg(pid, err, "error", st.id))
+                return await self._block(s, p, st, err)
+            structured, passed = None, True
+            if d.get("verdict"):
+                m = VERDICT_RE.search(output)
+                if m and m.group(1).upper().startswith("SEND"):
+                    reasons = one_line(m.group(2), 300) or "No reason given."
+                    structured, passed = {"verdict": "send_back", "reasons": reasons}, False
+                else:
+                    structured = {"verdict": "pass", "explicit": bool(m)}
+                    if not m:
+                        output += ("\n\n(No explicit verdict was given, so this check is recorded as a pass. "
+                                   "The human gates still review the work.)")
+            return await self._complete(s, p, st, d, flow, structured, output, passed=passed)
+
+    async def _complete(self, s, p: Project, st: ProjectStep, d: dict, flow: dict,
+                        structured: dict | None, raw_text: str, passed: bool) -> bool:
+        """Record a finished step and apply send-back, block and approval rules."""
+        pid = p.id
+        st.ended_at = utcnow()
+        rj = dict(structured or {})
+        rj["_passed"] = passed
+        st.result_json = rj
+        text = readable(raw_text)
+        if d.get("note"):
+            text = f"{d['note'].strip()}\n\n{text}"
+        st.summary = one_line(text)
+        s.add(ProjectMessage(project_id=pid, author_type="agent", agent_id=st.agent_id,
+                             step_id=st.id, kind="result", text=text))
+
+        # Rework coordinator: escalate when the round limit is passed.
+        if st.step_key == (flow.get("rework") or {}).get("key") and (structured or {}).get("status") == "escalate_to_human":
+            return await self._block(s, p, st, (
+                f"Round limit reached: the work was sent back {(structured or {}).get('round', '?') } times. "
+                "A human must decide: Retry for another round, or Stop the project."))
+
+        if not passed:
+            fail_mode = d.get("on_fail", "send_back" if d.get("verdict") else "block")
+            reasons = ([structured.get("reasons")] if structured and structured.get("verdict") == "send_back"
+                       else _fail_reasons(structured or {}))
+            if fail_mode == "send_back" and d.get("send_back") and p.status not in ENDED_PROJECT_STATES:
+                st.status = "completed"
+                await self._send_back(s, p, st, d, flow, reasons)
                 await s.commit()
                 await notify("project", pid)
-                return False
+                return p.status == "running"
+            return await self._block(s, p, st, f"{d.get('tag', st.tag)} did not pass: {'; '.join(reasons)}")
 
-            text = readable(output)
-            st.summary = one_line(text)
-            s.add(ProjectMessage(project_id=pid, author_type="agent", agent_id=st.agent_id,
-                                 step_id=st.id, kind="result", text=text))
-
-            appr = d.get("approval")
-            if appr and p.status not in ENDED_PROJECT_STATES:
-                req_id = new_approval_id()
-                s.add(Approval(
-                    request_id=req_id, request_type="other", agent_id=st.agent_id,
-                    details={"kind": "project_step", "project_id": pid, "step_id": st.id,
-                             "question": appr.get("question", "Can the team continue?")},
-                    requested_by=st.agent_id,
-                ))
-                st.approval_id = req_id
-                st.status = "needs_attention"  # waiting for a human decision
-                await s.commit()
-                await notify("project", pid)
-                await notify("workforce")
-                return False
-
-            st.status = "completed"
-            keep_going = p.status == "running"
+        appr = d.get("approval")
+        if appr and p.status not in ENDED_PROJECT_STATES:
+            req_id = new_approval_id()
+            s.add(Approval(
+                request_id=req_id, request_type="other", agent_id=st.agent_id,
+                details={"kind": "project_step", "project_id": pid, "step_id": st.id,
+                         "question": appr.get("question", "Can the team continue?"),
+                         "why": " ".join((appr.get("why") or "").split())},
+                requested_by=st.agent_id,
+            ))
+            st.approval_id = req_id
+            st.status = "needs_attention"  # waiting for a human decision
             await s.commit()
+            await notify("project", pid)
+            await notify("workforce")
+            return False
+
+        st.status = "completed"
+        keep_going = p.status == "running"
+        await s.commit()
         await notify("project", pid)
         return keep_going
+
+    async def _send_back(self, s, p: Project, st: ProjectStep, d: dict, flow: dict, reasons: list[str]) -> None:
+        """Checker sent the work back: Punargathan opens a rework round, the producers run again, checks repeat."""
+        sb = d["send_back"]
+        rework_key = (flow.get("rework") or {}).get("key")
+        done = (await s.execute(select(func.count()).select_from(ProjectStep).where(
+            ProjectStep.project_id == p.id, ProjectStep.step_key == rework_key))).scalar() or 0
+        note = f"{d.get('tag', st.tag)} sent the work back: {'; '.join(reasons)}"
+        max_rounds = int((flow.get("defaults") or {}).get("max_rework_rounds", 3))
+        if rework_key and done >= max_rounds:
+            # Punargathan escalates to a human; no further automatic rounds.
+            keys = [rework_key]
+        else:
+            keys = ([rework_key] if rework_key else []) + list(sb["to"]) + checks_between(flow, sb["recheck_from"], st.step_key)
+        prefill = {k: {"revision_note": note} for k in sb["to"]}
+        if rework_key:
+            prefill[rework_key] = {"pending_reasons": reasons, "round": done + 1}
+        await _insert_rounds(s, p.id, st.seq, keys, flow, None, prefill)
+        s.add(_sys_msg(p.id, f"{note}. Punargathan opens rework round {done + 1}; "
+                             f"{', '.join(sb['to'])} run again and the checks repeat.", "send_back", st.id))
 
     # -----------------------------------------------------------------------
     # recovery after a backend restart
@@ -358,8 +567,6 @@ class ProjectRunner:
             for st, p in rows:
                 ref = st.dispatch_ref
                 if ref and ref != dispatcher.LOCAL_REF and await redis_alive():
-                    # The task lives in the broker / result backend: wait for it again
-                    # (wait_celery gives up if it never starts).
                     resume.append((p.id, st.id, ref))
                     continue
                 st.status = "needs_attention"
@@ -392,22 +599,52 @@ async def readiness(flow_key: str | None = None) -> dict:
     async with async_session_maker() as s:
         agents = {a.canonical_id: a for a in (await s.execute(select(Agent))).scalars().all()}
     steps, not_active, seen = [], [], set()
-    for d in flow["steps"]:
+    for d in [step_def(flow, x["key"]) for x in flow["steps"]] + ([step_def(flow, flow["rework"]["key"])] if flow.get("rework") else []):
         a = agents.get(d["agent"])
         state = a.status if a else "not registered"
+        runs = d.get("mode", "think") != "skip"
         active = a is not None and a.status in RUNNABLE_STATES
         steps.append({
-            "key": d["key"], "agent_id": d["agent"], "agent_name": a.name if a else d["agent"],
-            "responsibility": d["responsibility"], "tag": d["tag"], "state": state, "active": active,
+            "key": d["key"], "block": d.get("block"), "agent_id": d["agent"],
+            "agent_name": a.name if a else d["agent"], "responsibility": d["responsibility"],
+            "tag": d["tag"], "mode": d.get("mode", "think"), "state": state, "active": active,
             "needs_approval": bool(d.get("approval")),
         })
-        if not active and d["agent"] not in seen:
+        if runs and not active and d["agent"] not in seen:
             seen.add(d["agent"])
             not_active.append({"canonical_id": d["agent"], "name": a.name if a else d["agent"], "state": state})
     from config.settings import get_settings
     return {"flow_key": flow["key"], "flow_name": flow.get("name"), "steps": steps,
             "ready": not not_active, "not_active": not_active,
             "client_id": get_settings().default_tenant_id}
+
+
+async def activate_needed(user: str) -> dict:
+    """Run the existing activation gate for every agent the flow needs and activate the ones that pass.
+
+    Uses the same gate and transition as the agent page; an agent that fails the gate stays inactive.
+    """
+    from backend.core.agent_runtime import LifecycleState, run_activation_gate, transition
+    ready = await readiness()
+    results = []
+    for a in ready["not_active"]:
+        cid = a["canonical_id"]
+        async with async_session_maker() as s:
+            gate = await run_activation_gate(s, cid)
+        if not gate.passed:
+            results.append({"canonical_id": cid, "name": a["name"], "activated": False,
+                            "reason": "; ".join(gate.failures)})
+            continue
+        try:
+            await transition(cid, LifecycleState.ACTIVE, performed_by=user,
+                             reason="Activated for the project chain after passing the activation gate",
+                             gate_result=gate)
+            results.append({"canonical_id": cid, "name": a["name"], "activated": True})
+        except Exception as e:
+            results.append({"canonical_id": cid, "name": a["name"], "activated": False, "reason": str(e)})
+    await notify("workforce")
+    return {"results": results, "activated": sum(1 for r in results if r["activated"]),
+            "failed": [r for r in results if not r["activated"]]}
 
 
 async def start_project(pid: str, message: str | None, user: str) -> None:
@@ -496,6 +733,12 @@ async def stop_project(pid: str, user: str) -> None:
     await notify("workforce")
 
 
+def _rerun_keys(d: dict, step_key: str) -> list[str]:
+    appr = d.get("approval") or {}
+    keys = list(appr.get("rerun") or [])
+    return keys or [step_key]
+
+
 async def retry_step(pid: str, step_id: int, user: str) -> None:
     async with async_session_maker() as s:
         p = await _project(s, pid)
@@ -513,17 +756,32 @@ async def retry_step(pid: str, step_id: int, user: str) -> None:
             raise ProjectError(409, "This step was already retried.")
         flow = get_flow(p.flow_key)
         d = step_def(flow, st.step_key) or {}
-        source = None
+        source, prefill = None, None
         if st.approval_id:
             appr = (await s.execute(select(Approval).where(
                 Approval.request_id == st.approval_id))).scalars().first()
             if appr is not None and appr.decision is None:
                 raise ProjectError(409, "This step is waiting for your decision.")
             source = st.approval_id
-            keys = [k for k in ((d.get("approval") or {}).get("revise_step"), st.step_key) if k]
+            keys = _rerun_keys(d, st.step_key)
+        elif st.step_key == (flow.get("rework") or {}).get("key"):
+            # round limit reached: a human asks for one more round
+            prev = st.result_json or {}
+            prefill = {st.step_key: {"pending_reasons": prev.get("reasons") or prev.get("pending_reasons") or [],
+                                     "round": int(prev.get("round", 1)), "max_rounds_override": True}}
+            keys = []
+            # skip the coordinator; run the producers and checks again directly
+            last_send = None
+            for x in flow["steps"]:
+                if x.get("send_back"):
+                    last_send = x
+            if last_send:
+                sb = last_send["send_back"]
+                keys = list(sb["to"]) + checks_between(flow, sb["recheck_from"], last_send["key"])
+                prefill = {k: {"revision_note": "A human asked for another round after the round limit."} for k in sb["to"]}
         else:
             keys = [st.step_key]
-        await _insert_rounds(s, pid, st.seq, keys, flow, source)
+        await _insert_rounds(s, pid, st.seq, keys, flow, source, prefill)
         st.error = (st.error or "") + (" " if st.error else "") + f"(Retried by {user}.)"
         p.status = "running"
         s.add(_sys_msg(pid, f"{user} pressed Retry. A new round starts.", "retry", st.id))
@@ -580,8 +838,7 @@ async def decide(pid: str, request_id: str, decision: str, note: str | None, use
         elif decision == "approve_with_changes":
             st.status = "completed"
             if not ended:
-                keys = [k for k in ((d.get("approval") or {}).get("revise_step"), st.step_key) if k]
-                await _insert_rounds(s, pid, st.seq, keys, flow, request_id)
+                await _insert_rounds(s, pid, st.seq, _rerun_keys(d, st.step_key), flow, request_id)
         else:
             st.status = "needs_attention"
             st.error = f"Rejected by {user}" + (f": {note}" if note else ".")

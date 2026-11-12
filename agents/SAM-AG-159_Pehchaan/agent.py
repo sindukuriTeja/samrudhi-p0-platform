@@ -3,6 +3,7 @@
 Stage 1B service-first agent. Creates and keeps each agent ID record and status.
 Service-first: lightweight identity lookup service (uses the agents registry).
 """
+from datetime import datetime, timezone
 from agents.base import BaseAgent, AgentResult, register_agent, load_all
 from backend.core.authority import authority_guard
 
@@ -51,3 +52,18 @@ class Pehchaan(BaseAgent):
         if cls is None:
             return {"canonical_id": canonical_id, "found": False}
         return {"canonical_id": canonical_id, "found": True, "name": cls.name, "type": cls.agent_type}
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
+        }

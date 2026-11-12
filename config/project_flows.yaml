@@ -1,123 +1,605 @@
 # Project flows used by the Control Room project runner.
 #
-# The runner contains no agent logic: it reads a flow from this file and
-# dispatches each step to the existing agent through the existing Celery task
-# (workers.tasks.run_agent_task), after checking the agent is Active and that
-# the step's permission passes the authority guard.
+# The documented chain from "How a Project Runs: What Each Agent Does" (Stage 1 and
+# Stage 2 Phases 1-3), which follows the PDF pilot sequence (Document 01C section 7)
+# and the enterprise handoffs (Document 01B section 8). Agent roles follow
+# config/agent_registry.yaml (PDF canonical registry, Document 01C).
 #
-# Agent roles follow config/agent_registry.yaml (PDF canonical registry, Document 01C).
-# Stage names follow Daksh's delivery workflow state machine
-# (SAM-AG-002 get_workflow_state: planning -> allocated -> executing -> quality
-# -> approved -> delivered). Agents and actions come from each agent's own
-# mission and AUTHORITY matrix (agents/<id>_<Name>/agent.py).
+# The runner contains no agent logic. Each step is one of:
+#   think  - the agent's own run() through the existing Celery task (uses the local model)
+#   tool   - the agent's own authority-guarded tool, run in code (no model)
+#   skip   - the step exists in the chain but has nothing real to work on yet; it is
+#            recorded as skipped with the reason, never faked
 #
 # Step fields
-#   key             unique step key inside the flow
-#   agent           canonical_id of the agent that runs the step
-#   action          passed to agent.run(action=...)
-#   permission      authority-guard permission checked before dispatch
-#   tag             short task tag shown on the conversation card
-#   responsibility  one-line description shown in the "Agents on this project" panel
-#   instruction     task text sent to the agent
-#   deliverable     (optional) what this step delivers, listed in History
-#   approval        (optional) a human decision is required after the step
-#     question        one-line question shown on the approval card
-#     revise_step     step that is re-run (new round) on "approve with changes" or Retry
-#     revise_permission  permission checked for that revision round
+#   key, block, agent, tag, responsibility, gives
+#   think: action, permission, instruction, inputs (step keys whose latest result is handed over)
+#          verdict: true  -> the agent must end with "VERDICT: PASS" or "VERDICT: SEND BACK - reasons"
+#   tool:  method, args (placeholders below), pass_if (field: value), on_fail (send_back | block)
+#   send_back: the steps that run again as a new round, then every check from recheck_from
+#   approval: a human gate after the step (question, why, rerun = steps re-run on changes/retry)
+#
+# Placeholders in tool args
+#   $project_id $project_name $client_id $today $scope $routing $active_agents $chain_permissions
+#   $checks $required_checks $tokens_total $model_steps $accepted_deliverables $cost_per_1k_tokens
+#   $send_back_reasons $rework_round $result:<step>.<field> $output:<step>
 
-default_flow: content_production
+default_flow: documented_chain
 
 flows:
-  content_production:
-    name: Content production
+  documented_chain:
+    name: Documented project chain
+    defaults:
+      scope: {social_posts: 3}          # overridden when the instructions say e.g. "5 posts"
+      schedule_days: 30
+      max_per_agent: 10
+      max_rework_rounds: 3
+      cost_per_1k_tokens: null           # set a real rate to get money figures; null = unavailable
+      routing:                           # which agents produce each package type (Vitaran assigns)
+        social_posts: [SAM-AG-082, SAM-AG-078, SAM-AG-083]
+      required_checks: [shuddhi, pariksha, gunvatta, swasthya, gopniya]
+    rework:
+      key: rework
+      agent: SAM-AG-071                  # Punargathan - Rework Coordination
+      tag: Rework
+      responsibility: Manages the fix and counts rounds
+      gives: Rework request to the writer
+      method: create_rework_request
+      args: {item_ref: $project_id, reasons: $send_back_reasons, round_no: $rework_round, max_rounds: $max_rework_rounds}
     steps:
-      - key: brief
-        stage: planning
-        agent: SAM-AG-049        # Smriti - Client Knowledge (CEX-007)
+      # ---------------- Block 1: Start and check ----------------
+      - key: start_check
+        block: 1
+        agent: SAM-AG-161                # Adhikar - Tool Permissions (Niyantrak's Active check runs at Start)
+        mode: tool
+        tag: Start check
+        responsibility: Checks every agent may use the tools its step needs
+        gives: Ready, or the permissions that are missing
+        method: check_many
+        args: {pairs: $chain_permissions}
+        pass_if: {status: ready}
+        on_fail: block
+
+      # ---------------- Block 2: Kick-off ----------------
+      - key: kickoff
+        block: 2
+        agent: SAM-AG-001                # Arjun - AI CEO
+        mode: think
+        action: kickoff
+        permission: ops.coordinate
+        tag: Kick-off
+        responsibility: Sets the goal, priority, deadline and owners
+        gives: Project record to Samanvay and Mitra
+        instruction: >-
+          Start this project. State the goal, the priority, the deadline and the owner of each part
+          (client, delivery, creative, data). If the instructions do not give a deadline, say it is
+          unavailable. Keep it under 120 words.
+      - key: actions
+        block: 2
+        agent: SAM-AG-013                # Samanvay - Executive Coordination
+        mode: tool
+        tag: Action list
+        responsibility: Opens the action list and decision log
+        gives: Action list for all owners
+        method: open_action_list
+        args: {project_ref: $project_id, owners: [SAM-AG-004, SAM-AG-002, SAM-AG-003, SAM-AG-009]}
+
+      # ---------------- Block 3: Understand the client ----------------
+      - key: client_expectations
+        block: 3
+        agent: SAM-AG-004                # Mitra - AI CXO
+        mode: think
+        action: expectations
+        permission: cex.monitor_account
+        tag: Client expectations
+        responsibility: Confirms the client's expectations and sign-off rules
+        gives: Expectations and approval rules to Smriti
+        inputs: [kickoff]
+        instruction: >-
+          Confirm who the client is, what they expect from this project and what needs their
+          sign-off before anything is published. Use only what is known; mark the rest
+          unavailable. Keep it under 120 words.
+      - key: client_context
+        block: 3
+        agent: SAM-AG-049                # Smriti - Client Knowledge
+        mode: think
         action: capture
         permission: crt.capture_context
-        tag: Client brief
-        responsibility: Reads the client brief and brand rules
+        tag: Client context
+        responsibility: Loads the approved client facts and rules
+        gives: Client context pack to Shruti
+        inputs: [client_expectations]
         instruction: >-
-          Capture the client brief for this project: brand tone, audience, and
-          any rules the content must follow. If something is not known, say it
-          is unavailable. Keep it under 120 words.
+          List the approved client facts for this project: brand voice, services, audience and
+          forbidden claims. Do not invent facts; anything not on record is unavailable. Keep it
+          under 120 words.
+      - key: brief
+        block: 3
+        agent: SAM-AG-050                # Shruti - Client Brief & Requirements
+        mode: think
+        action: brief
+        permission: cex.structure_brief
+        tag: Client brief
+        responsibility: Writes one clear brief
+        gives: Client brief to Daksh and Disha
+        inputs: [kickoff, client_context]
+        instruction: >-
+          Write one clear brief with exactly these headings: Objective, Audience, Deliverables,
+          Deadline, Limits. Use the instructions and the client context only. Keep it under 150 words.
 
+      # ---------------- Block 4: Plan the delivery ----------------
+      - key: workflow
+        block: 4
+        agent: SAM-AG-002                # Daksh - AI COO
+        mode: think
+        action: plan
+        permission: ops.create_workflow
+        tag: Workflow
+        responsibility: Owns the delivery workflow; decides order and priority
+        gives: Workflow created, to Yojana
+        inputs: [brief]
+        instruction: >-
+          Decide the delivery order and priority for this brief: planning, content, checks,
+          approval, publishing and reporting. Keep it under 100 words.
+      - key: delivery_plan
+        block: 4
+        agent: SAM-AG-059                # Yojana - Delivery Planning Lead
+        mode: think
+        action: plan
+        permission: ops.create_delivery_plan
+        tag: Delivery plan
+        responsibility: Makes the delivery plan and milestones
+        gives: Delivery plan to Sankalan
+        inputs: [brief, workflow]
+        instruction: >-
+          Make the delivery plan: workstreams and milestones with dates relative to today. Keep it
+          under 120 words.
+      - key: work_packages
+        block: 4
+        agent: SAM-AG-064                # Sankalan - Scope-to-Delivery Planning
+        mode: tool
+        tag: Work packages
+        responsibility: Splits the scope into work packages
+        gives: Work package list to Samay
+        method: build_work_packages
+        args: {client_id: $client_id, scope: $scope}
+        pass_if: {status: planned}
+        on_fail: block
+      - key: schedule
+        block: 4
+        agent: SAM-AG-065                # Samay - Production Scheduling
+        mode: tool
+        tag: Schedule
+        responsibility: Sets a deadline for each package
+        gives: Schedule to Niyojan
+        method: schedule_packages
+        args: {packages: $result:work_packages.work_packages, start_date: $today, days: $schedule_days}
+      - key: resources
+        block: 4
+        agent: SAM-AG-060                # Niyojan - Resource & Capacity Lead
+        mode: tool
+        tag: Resources
+        responsibility: Decides which resources are needed
+        gives: Resource need to Kshamata
+        method: assess_resource_need
+        args: {plan_id: $project_id, packages: $result:schedule.packages}
+      - key: capacity
+        block: 4
+        agent: SAM-AG-067                # Kshamata - Agent Capacity
+        mode: tool
+        tag: Capacity check
+        responsibility: Checks no agent is overloaded
+        gives: Capacity OK or a warning, to Vitaran
+        method: check_capacity
+        args: {packages: $result:schedule.packages, routing: $routing, max_per_agent: $max_per_agent}
+      - key: assignments
+        block: 4
+        agent: SAM-AG-066                # Vitaran - Task Allocation
+        mode: tool
+        tag: Assignments
+        responsibility: Assigns each package to a qualified, Active agent
+        gives: Assignments to Pravartan
+        method: assign_packages
+        args: {packages: $result:schedule.packages, routing: $routing, active_agents: $active_agents}
+        pass_if: {status: assigned}
+        on_fail: block
+      - key: pipeline
+        block: 4
+        agent: SAM-AG-061                # Pravartan - Workflow Orchestration Lead
+        mode: tool
+        tag: Pipeline
+        responsibility: Sets the handoff order and starts the pipeline
+        gives: Pipeline started, to Aarya
+        method: define_handoff_order
+        args: {workflow_ref: $project_id, steps: $chain_steps}
+
+      # ---------------- Block 5: Decide the content ----------------
+      - key: creative_request
+        block: 5
+        agent: SAM-AG-003                # Aarya - AI CCO
+        mode: think
+        action: strategy
+        permission: crt.set_strategy
+        tag: Creative request
+        responsibility: Leads the creative work and sets the quality bar
+        gives: Creative request to Anvesh
+        inputs: [brief]
+        instruction: >-
+          Set the quality bar for this work: what good looks like, the brand rules that must hold
+          and what the research must answer. Keep it under 100 words.
       - key: research
-        stage: planning
-        agent: SAM-AG-081        # Anvesh - healthcare research
+        block: 5
+        agent: SAM-AG-081                # Anvesh - Healthcare Content Research
+        mode: think
         action: research
         permission: crt.research_topic
         tag: Research
-        responsibility: Researches the topic and checks sources
+        responsibility: Finds facts and marks what is not verified
+        gives: Research pack to Disha
+        inputs: [brief, creative_request]
         instruction: >-
-          Research the topic of this project. List the key facts the content
-          can rely on and the sources behind them. Leave out anything that
-          cannot be verified. Keep it under 150 words.
-
+          List the key facts the content can use. You cannot browse the web: name the organisation
+          you rely on for each fact and mark every fact "not verified against a live source". Do not
+          invent quotes or numbers. Keep it under 150 words.
       - key: direction
-        stage: planning
-        agent: SAM-AG-076        # Disha - Content Strategy & Research Lead (CRT-002)
+        block: 5
+        agent: SAM-AG-076                # Disha - Content Strategy & Research Lead
+        mode: think
         action: strategy
         permission: crt.set_key_messages
         tag: Content direction
-        responsibility: Sets the content direction
+        responsibility: Chooses themes, tone and key messages
+        gives: Content direction to Kalpana
+        inputs: [brief, research]
         instruction: >-
-          Using the brief and the research, set the content direction: what
-          pieces to make, the message of each, the voice, and one clear call
-          to action per piece. Keep it under 150 words.
+          Choose the content themes, the tone and one key message per piece. Do not write the
+          posts. Keep it under 120 words.
+      - key: calendar
+        block: 5
+        agent: SAM-AG-077                # Kalpana - Editorial Planning Lead
+        mode: think
+        action: plan
+        permission: crt.build_editorial_calendar
+        tag: Calendar
+        responsibility: Builds the content calendar with a short brief per post
+        gives: Calendar to Tarangini
+        inputs: [direction, schedule]
+        instruction: >-
+          Build the content calendar: one line per post with date, theme and a one-sentence brief.
+          Use the package deadlines. Keep it under 120 words.
+      - key: distribution
+        block: 5
+        agent: SAM-AG-079                # Tarangini - Social Media & Distribution Lead
+        mode: think
+        action: distribute
+        permission: crt.create_distribution_plan
+        tag: Distribution plan
+        responsibility: Picks platform, format and posting time
+        gives: Distribution plan to Gate 1
+        inputs: [calendar]
+        instruction: >-
+          For each post in the calendar pick the platform, the format and a posting time. Keep it
+          under 100 words.
+        approval:
+          question: Is the content direction, calendar and distribution plan right?
+          why: >-
+            The direction and calendar decide everything that follows. The Blueprint makes the
+            account owner approve them before any content is made (Human Approval Gate 1).
+          rerun: [direction, calendar, distribution]
 
+      # ---------------- Block 6: Make the content ----------------
       - key: writing
-        stage: executing
-        agent: SAM-AG-082        # Lekha - healthcare copywriting
+        block: 6
+        agent: SAM-AG-082                # Lekha - Healthcare Copywriting
+        mode: think
         action: write
         permission: crt.write_copy
+        revise_permission: crt.revise_copy
         tag: Writing
-        responsibility: Writes the copy
+        responsibility: Writes the copy (draft only)
+        gives: Draft copy to Roop and Shuddhi
         deliverable: Copy
+        inputs: [calendar, research, client_context]
         instruction: >-
-          Write the copy for every piece in the content direction. Use only
-          facts from the research. Do not give medical advice. Keep each piece short.
-
+          Write the copy for every post in the calendar: caption, headline and one call to action.
+          Use only the research facts. No medical advice, no cure claims. Write only the posts.
       - key: design_brief
-        stage: executing
-        agent: SAM-AG-078        # Roop - creative briefs
+        block: 6
+        agent: SAM-AG-078                # Roop - Creative Production Lead
+        mode: think
         action: create
         permission: crt.create_creative_brief
         tag: Design brief
         responsibility: Writes the design brief
+        gives: Design brief to Chitra
         deliverable: Design brief
+        inputs: [writing, distribution]
         instruction: >-
-          Write a design brief for each piece of copy: layout, visual idea,
-          and the text that goes on the image. Keep it under 150 words.
+          Write a design brief per post: layout, visual idea and the text on the image. Keep it
+          under 150 words.
+      - key: artwork
+        block: 6
+        agent: SAM-AG-083                # Chitra - Visual Creative Production
+        mode: think
+        action: create
+        permission: crt.design_asset
+        tag: Artwork
+        responsibility: Prepares the artwork from the design brief
+        gives: Visuals to Shuddhi
+        deliverable: Artwork specification
+        inputs: [design_brief]
+        instruction: >-
+          No image tool is connected, so do not claim to have made images. For each post, write the
+          artwork specification a designer would build from the approved templates: size, layout,
+          colours, image subject and text placement. Keep it under 150 words.
 
-      - key: compliance
-        stage: quality
-        agent: SAM-AG-080        # Shuddhi - compliance and quality
+      # ---------------- Block 7: Check the content ----------------
+      - key: shuddhi
+        block: 7
+        agent: SAM-AG-080                # Shuddhi - Content Quality & Clinical Screening
+        mode: think
         action: check
         permission: crt.check_compliance
-        tag: Compliance check
-        responsibility: Checks medical claims and compliance
+        tag: Claim screening
+        responsibility: Checks medical claims, facts and brand fit
+        gives: Pass, or a send-back with reasons
+        inputs: [writing, artwork, client_context]
+        verdict: true
         instruction: >-
-          Check the copy for healthcare compliance and brand rules. Name every
-          claim that cannot be supported and say what should change. Keep it under 120 words.
-        approval:
-          question: Shuddhi has checked the copy. Can the team continue with it?
-          revise_step: writing
-          revise_permission: crt.revise_copy
-
-      - key: review
-        stage: quality
-        agent: SAM-AG-094        # Pariksha - content review and fact check
+          Screen the copy and the artwork specification for unsupported medical claims, wrong facts
+          and brand problems. Do not rewrite the posts. List each problem in one line.
+        send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
+      - key: pariksha
+        block: 7
+        agent: SAM-AG-094                # Pariksha - Platform & Technical Content QA
+        mode: think
         action: review
         permission: crt.review_content
-        tag: Final review
-        responsibility: Fact-checks and reviews the final work
-        deliverable: Review report
+        tag: Technical QA
+        responsibility: Checks sizes, formats, links and platform rules
+        gives: Technical pass to Gunvatta
+        inputs: [writing, artwork, distribution]
+        verdict: true
         instruction: >-
-          Review the final copy and design briefs for accuracy, fact-check
-          them against the research, and list anything that still needs work. Keep it under 120 words.
+          Check the posts against the platform rules in the distribution plan: length, format,
+          image size and links. Check only what is in front of you. Do not rewrite the posts.
+        send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
+      - key: gunvatta
+        block: 7
+        agent: SAM-AG-183                # Gunvatta - Output Quality Evaluation (independent)
+        mode: tool
+        tag: Quality evaluation
+        responsibility: Scores quality independently
+        gives: Score to Swasthya
+        method: evaluate_output
+        args: {content: $output:writing, producer_agent: SAM-AG-082, required_elements: []}
+        pass_if: {passed: true}
+        on_fail: send_back
+        send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
+      - key: swasthya
+        block: 7
+        agent: SAM-AG-186                # Swasthya - Healthcare Content & Advertising Compliance
+        mode: tool
+        tag: Health-claim compliance
+        responsibility: Blocks high-risk medical and advertising claims
+        gives: Pass or block, to Gopniya
+        method: screen_claims
+        args: {content: $output:writing}
+        pass_if: {status: pass}
+        on_fail: send_back
+        send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
+      - key: gopniya
+        block: 7
+        agent: SAM-AG-187                # Gopniya - Privacy & Confidentiality
+        mode: tool
+        tag: Privacy check
+        responsibility: Checks no personal or other-client data appears
+        gives: Privacy pass to Nirikshan
+        method: check_privacy
+        args: {content: $output:writing}
+        pass_if: {status: pass}
+        on_fail: send_back
+        send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
+      - key: nirikshan
+        block: 7
+        agent: SAM-AG-062                # Nirikshan - Delivery Control Lead
+        mode: tool
+        tag: Checks present
+        responsibility: Confirms every required check is present
+        gives: Ready or missing check, to Pramaan
+        method: confirm_checks_present
+        args: {checks: $checks, required: $required_checks}
+        pass_if: {status: ready}
+        on_fail: block
+      - key: pramaan
+        block: 7
+        agent: SAM-AG-072                # Pramaan - Delivery Acceptance
+        mode: tool
+        tag: Delivery acceptance
+        responsibility: Confirms conditions are met; refuses if anything is missing
+        gives: Readiness confirmed, to Sweekriti
+        method: verify_acceptance
+        args: {item_ref: $project_id, checks: $checks}
+        pass_if: {accepted: true}
+        on_fail: block
+      - key: sweekriti
+        block: 7
+        agent: SAM-AG-052                # Sweekriti - Client Approval & Sign-off
+        mode: tool
+        tag: Approval request
+        responsibility: Builds the approval request with the evidence
+        gives: Approval request to Gate 2
+        method: build_approval_request
+        args: {content_ref: $project_id, evidence: $checks}
+        pass_if: {status: ready_for_human_approval}
+        on_fail: block
         approval:
-          question: Pariksha has reviewed the final work. Approve it as ready to publish?
-          revise_step: writing
-          revise_permission: crt.revise_copy
+          question: Is the final content safe and good to publish?
+          why: >-
+            This is healthcare content for the public. The Blueprint makes human review mandatory
+            for external publication, with zero tolerance for unauthorised publishing or incorrect
+            clinical claims. Agents only screen; a qualified person and the client approve
+            (Human Approval Gate 2).
+          rerun: [writing, design_brief, artwork, shuddhi, pariksha, gunvatta, swasthya, gopniya, nirikshan, pramaan, sweekriti]
+
+      # ---------------- Block 8: Send and publish ----------------
+      - key: client_update
+        block: 8
+        agent: SAM-AG-051                # Sandesh - Client Communication
+        mode: think
+        action: compose
+        permission: cex.compose_message
+        tag: Client update
+        responsibility: Prepares the approved update for the client
+        gives: Client update to Prakash
+        inputs: [writing, distribution]
+        instruction: >-
+          Write a short update to the client saying what was approved and when each post will go
+          out. Do not add new claims. Keep it under 100 words.
+      - key: publishing
+        block: 8
+        agent: SAM-AG-084                # Prakash - Content Publishing
+        mode: tool
+        tag: Publishing
+        responsibility: Schedules only approved content
+        gives: Publication record to Sangrah
+        method: schedule_release
+        args: {client_id: $client_id, content_ref: $project_id, scheduled_time: $today, channels: [as per distribution plan]}
+        note: >-
+          No publishing connector is set up, so this only records the schedule. Nothing is posted.
+
+      # ---------------- Block 9: Measure and report ----------------
+      - key: data_collection
+        block: 9
+        agent: SAM-AG-121                # Sangrah - Data Ingestion
+        mode: skip
+        tag: Data collection
+        responsibility: Collects the numbers
+        gives: Raw data to Shodhan
+        reason: Nothing was published and no analytics connector is set up, so there are no numbers to collect.
+      - key: data_cleaning
+        block: 9
+        agent: SAM-AG-122                # Shodhan - Data Cleaning & Validation
+        mode: skip
+        tag: Data cleaning
+        responsibility: Removes errors and duplicates
+        gives: Clean data to Samanjasya
+        reason: No data was collected.
+      - key: data_matching
+        block: 9
+        agent: SAM-AG-123                # Samanjasya - Data Reconciliation
+        mode: skip
+        tag: Data matching
+        responsibility: Matches records from different sources
+        gives: Matched data to Paribhasha
+        reason: No data was collected.
+      - key: kpi_values
+        block: 9
+        agent: SAM-AG-124                # Paribhasha - KPI Definition Governance
+        mode: skip
+        tag: KPI values
+        responsibility: Applies the agreed formula for each KPI
+        gives: KPI values to Drishti and Darpan
+        reason: No data was collected, so no KPI can be calculated.
+      - key: performance
+        block: 9
+        agent: SAM-AG-085                # Drishti - Social Media Performance
+        mode: skip
+        tag: Performance
+        responsibility: Explains how the posts performed
+        gives: Performance notes to Prativedan
+        reason: No published posts to measure.
+      - key: client_report
+        block: 9
+        agent: SAM-AG-125                # Prativedan - Client Reporting
+        mode: think
+        action: report
+        permission: crt.produce_client_report
+        tag: Client report
+        responsibility: Writes the client report
+        gives: Client report to Samiksha and Lakshya
+        deliverable: Client report
+        inputs: [brief, writing, publishing]
+        instruction: >-
+          Write the client report: what was produced, what was approved and scheduled, and that
+          performance figures are unavailable until posts are live. Keep it under 150 words.
+      - key: dashboards
+        block: 9
+        agent: SAM-AG-126                # Darpan - Dashboards & Visualisation
+        mode: skip
+        tag: Dashboards
+        responsibility: Updates the dashboards
+        gives: Dashboard view
+        reason: No KPI values to show yet.
+      - key: costing
+        block: 9
+        agent: SAM-AG-146                # Lagaat - AI Workforce & Service Costing
+        mode: tool
+        tag: Service cost
+        responsibility: Works out cost per accepted deliverable from the run log
+        gives: Cost figure to Medha
+        method: summarise_run_cost
+        args: {tokens: $tokens_total, steps: $model_steps, accepted_deliverables: $accepted_deliverables, cost_per_1k_tokens: $cost_per_1k_tokens}
+      - key: intelligence
+        block: 9
+        agent: SAM-AG-009                # Medha - AI Chief Data & Intelligence Officer
+        mode: think
+        action: report
+        permission: dat.produce_report
+        tag: Data summary
+        responsibility: Gives one trusted data summary
+        gives: Intelligence summary to Lakshya and Arjun
+        inputs: [client_report, costing]
+        instruction: >-
+          Give one short data summary for this project from the report and the cost figures. Say
+          clearly which numbers are unavailable. Keep it under 100 words.
+
+      # ---------------- Block 10: Close ----------------
+      - key: kpi_status
+        block: 10
+        agent: SAM-AG-012                # Lakshya - Enterprise KPI Intelligence
+        mode: think
+        action: measure
+        permission: ceo.measure_kpi
+        tag: KPI status
+        responsibility: Compares results with targets and flags gaps
+        gives: KPI status to Arjun
+        inputs: [intelligence]
+        instruction: >-
+          Compare the results with the targets. If no targets or results exist, say so plainly and
+          list what must be measured next. Keep it under 80 words.
+      - key: review_notes
+        block: 10
+        agent: SAM-AG-053                # Samiksha - Client Review Intelligence
+        mode: think
+        action: review
+        permission: cex.review_client
+        tag: Review notes
+        responsibility: Prepares the review notes and action items
+        gives: Actions to Samanvay
+        inputs: [client_report]
+        instruction: >-
+          Prepare the client review notes and up to three action items, each with an owner. Keep it
+          under 100 words.
+      - key: close_actions
+        block: 10
+        agent: SAM-AG-013                # Samanvay - Executive Coordination (second time)
+        mode: tool
+        tag: Close actions
+        responsibility: Closes or assigns the open actions
+        gives: Updated action list
+        method: close_action
+        args: {action_id: $result:actions.record_id, evidence: $project_id}
+      - key: final_brief
+        block: 10
+        agent: SAM-AG-001                # Arjun - AI CEO (second time)
+        mode: think
+        action: report
+        permission: ops.coordinate
+        tag: Final brief
+        responsibility: Writes the final project brief
+        gives: Final brief for the human
+        inputs: [kickoff, review_notes, costing]
+        instruction: >-
+          Write the final project brief: what was done, the human decisions, the cost figures as
+          given (or unavailable), and the open risks. Keep it under 150 words.

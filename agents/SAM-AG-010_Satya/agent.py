@@ -122,3 +122,18 @@ HARD RULES — NEVER VIOLATE:
             "scores": scores,  # {quality, efficiency, reliability, contribution, adaptability}
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
+        }

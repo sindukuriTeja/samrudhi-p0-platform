@@ -23,6 +23,7 @@ class Nirikshan(BaseAgent):
     agent_type = "thinking"
 
     AUTHORITY = {
+        "ops.confirm_checks_present": True,
         "ops.monitor_work": True,
         "ops.check_progress": True,
         "ops.report_status": True,
@@ -245,3 +246,11 @@ HARD RULES — NEVER VIOLATE
             "status": "pending_human_approval",
             "routed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @authority_guard("ops.confirm_checks_present")
+    def confirm_checks_present(self, checks: dict, required: list) -> dict:
+        """Confirm every required check has a recorded pass."""
+        missing = [c for c in required or [] if not (checks or {}).get(c)]
+        return {"checks": checks, "missing": missing,
+                "status": "ready" if not missing else "missing_check",
+                "confirmed_at": datetime.now(timezone.utc).isoformat()}

@@ -63,8 +63,8 @@ def test_governance_denials_and_escalation_path(cid):
         for perm in ("gov.certify", "gov.modify_finding"):
             with pytest.raises(AuthorityError):
                 check_authority(cid, perm)
-    # Known gap (not part of the registry fix): the Stage 1A agents have no escalation method yet.
-    if AGENTS[cid]["stage"] in ("P0-1C", "P1-P1", "P1-P2", "P1-P3"):
+    # Every agent needs an escalation path: the activation gate checks for one.
+    if True:
         agent = cls()
         assert any(hasattr(agent, m) for m in ("route_for_approval", "escalate", "escalate_operational_issue",
                                                "escalate_client_issue"))

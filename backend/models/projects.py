@@ -75,6 +75,8 @@ class ProjectStep(Base):
     approval_id: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)  # -> approvals.request_id
     source_approval_id: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)  # round caused by
     dispatch_ref: Mapped[str | None] = mapped_column(VARCHAR(80), nullable=True)  # celery task id / "local"
+    # structured result of the step: tool output, or {"verdict": ..., "reasons": ...} for checkers
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (Index("idx_pstep_project_seq", "project_id", "seq"),)
 

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from backend.core.auth import get_current_user
+from backend.core.auth import get_current_user, require_role
 from backend.core.message_bus import bus
 from backend.database import async_session_maker
 from backend.models.projects import Project
@@ -71,6 +71,16 @@ async def projects_create(req: ProjectCreate, user: dict = Depends(get_current_u
 async def projects_flow():
     """The flow a new project runs, and whether every agent it needs is Active."""
     return await R.readiness()
+
+
+@router.post("/flow/activate")
+async def projects_flow_activate(user: dict = Depends(require_role("founder", "assurance_lead"))):
+    """Run the activation gate for every agent the flow needs and activate those that pass.
+
+    Same gate and transition as the agent page (POST /api/agents/{id}/transition); agents that
+    fail the gate stay inactive and are listed with the reason.
+    """
+    return await R.activate_needed(user["username"])
 
 
 @router.get("/history")

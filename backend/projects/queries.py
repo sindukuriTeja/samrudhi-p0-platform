@@ -12,7 +12,7 @@ from backend.projects.common import (
     ENDED_PROJECT_STATES, OPEN_PROJECT_STATES, RUNNABLE_STATES, iso, seconds_between, utcnow,
 )
 from backend.projects.events import redis_alive
-from backend.projects.flow import get_flow, step_def
+from backend.projects.flow import BLOCKS, get_flow, step_def
 from backend.projects.runner import ProjectError, open_issues
 
 
@@ -31,8 +31,13 @@ async def _names(s) -> dict[str, dict]:
     return {a.canonical_id: {"name": a.name, "designation": a.designation, "status": a.status} for a in rows}
 
 
-def _step_out(st: ProjectStep, names: dict, superseded: bool) -> dict:
+def _step_out(st: ProjectStep, names: dict, superseded: bool, flow: dict | None = None) -> dict:
+    d = (step_def(flow, st.step_key) if flow else None) or {}
+    block = d.get("block")
     return {
+        "block": block, "block_label": BLOCKS.get(block), "mode": d.get("mode", "think"),
+        "result": {k: v for k, v in (st.result_json or {}).items() if not k.startswith("_")} or None,
+        "passed": (st.result_json or {}).get("_passed"),
         "id": st.id, "seq": st.seq, "step_key": st.step_key, "agent_id": st.agent_id,
         "agent_name": names.get(st.agent_id, {}).get("name", st.agent_id),
         "responsibility": st.responsibility, "tag": st.tag, "round": st.round,
@@ -60,10 +65,14 @@ async def project_state(pid: str) -> dict:
         decisions = {d.request_id: d for d in (await s.execute(select(ApprovalDecision).where(
             ApprovalDecision.request_id.in_(appr_ids)))).scalars().all()} if appr_ids else {}
 
+    try:
+        flow = get_flow(p.flow_key)
+    except KeyError:
+        flow = None
     step_out = []
     for i, st in enumerate(steps):
         superseded = any(o.step_key == st.step_key for o in steps[i + 1:])
-        step_out.append(_step_out(st, names, superseded))
+        step_out.append(_step_out(st, names, superseded, flow))
     by_step = {st.id: st for st in steps}
     appr_out = []
     for a in sorted(approvals, key=lambda a: a.requested_at or utcnow()):
@@ -72,7 +81,8 @@ async def project_state(pid: str) -> dict:
         appr_out.append({
             "request_id": a.request_id, "step_id": st.id if st else None,
             "agent_id": a.agent_id, "agent_name": names.get(a.agent_id, {}).get("name", a.agent_id),
-            "question": (a.details or {}).get("question"), "requested_at": iso(a.requested_at),
+            "question": (a.details or {}).get("question"), "why": (a.details or {}).get("why"),
+            "requested_at": iso(a.requested_at),
             "decision": dec.decision if dec else a.decision, "note": dec.note if dec else a.note,
             "decided_by": dec.decided_by if dec else a.decided_by,
             "decided_at": iso(dec.decided_at if dec else a.decided_at),

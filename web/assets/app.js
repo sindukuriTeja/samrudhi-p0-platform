@@ -128,7 +128,17 @@ $('#login-form').addEventListener('submit', async ev => {
   } catch (e) { $('#login-error').textContent = e.message; }
   finally { btn.disabled = false; }
 });
-async function act(fn) { if (!(await requireAuth())) return null; return fn(); }
+async function act(fn) {
+  if (!(await requireAuth())) return null;
+  try { return await fn(); }
+  catch (e) {
+    if (e.status !== 401) throw e;
+    // the session expired: sign in again and retry once
+    setAuth(null);
+    if (!(await requireAuth())) return null;
+    return fn();
+  }
+}
 
 /* ======================================================================
    live feed: Server-Sent Events, falling back to polling every 5 s
@@ -337,6 +347,7 @@ async function viewNew() {
 async function viewProject(pid) {
   main(stateView('loading'));
   let live = null, tick = null, startBusy = false, ready = null, readyErr = null, startKey = null, runSig = null;
+  let activateBusy = false, activateResult = '';
 
   async function load() {
     try {
@@ -377,7 +388,10 @@ async function viewProject(pid) {
         <p class="muted" style="margin:6px 0 0">Press Start. The team begins and you will see every step live.</p></div>
         ${readyErr ? `<div class="notready" role="alert">Could not check the team: ${esc(readyErr)} <button class="btn btn-sm" id="ready-retry">${I.retry} Retry</button></div>` : ''}
         ${notReady ? `<div class="notready" role="alert" id="notready"><strong>${SYM.needs_attention('var(--red)')} Some agents this project needs are not deployed yet.</strong>
-            <div class="muted small" style="margin-top:4px">The project cannot start until every agent below is Active. Activate each one on its agent page (activation gate, then lifecycle transition).</div>
+            <div class="muted small" style="margin-top:4px">The project cannot start until every agent below is Active (${ready.not_active.length} of them). Activate each one on its agent page, or run the activation gate for all of them at once. Agents that fail the gate stay inactive.</div>
+            <div class="row" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="activate-all" ${activateBusy ? 'disabled' : ''}>${I.check} Run the activation gate for these agents</button>
+              <span class="muted small">Needs a founder or assurance-lead sign-in.</span></div>
+            ${activateResult ? `<div class="small" style="margin-top:8px" role="status">${esc(activateResult)}</div>` : ''}
             <ul>${ready.not_active.map(a => `<li><a href="/legacy/?agent=${encodeURIComponent(a.canonical_id)}" target="_blank" rel="noopener">${esc(a.name)} (${esc(a.canonical_id)})</a> — ${esc(a.state)} ${I.ext}</li>`).join('')}</ul></div>` : ''}
         <div class="start-wrap"><button class="start-btn" id="start" ${notReady || startBusy || readyErr ? 'disabled' : ''} aria-describedby="start-help">START</button></div>
         <div class="card instr-card">
@@ -392,6 +406,18 @@ async function viewProject(pid) {
       </div>`);
     $$('[data-chip]').forEach(b => b.onclick = () => { const t = $('#start-msg'); t.value = b.dataset.chip; t.focus(); });
     const rr = $('#ready-retry'); if (rr) rr.onclick = async () => { await loadReady(); renderStart(); };
+    const aa = $('#activate-all'); if (aa) aa.onclick = async () => {
+      if (activateBusy) return;
+      activateBusy = true; activateResult = 'Running the activation gate…'; renderStart();
+      try {
+        const r = await act(() => api('/api/projects/flow/activate', { method: 'POST' }));
+        if (r) activateResult = `${r.activated} agent${r.activated === 1 ? '' : 's'} activated.` +
+          (r.failed.length ? ` Not activated: ${r.failed.map(f => `${f.name} (${f.reason})`).join('; ')}.` : '');
+        else activateResult = '';
+      } catch (e) { activateResult = e.status === 403 ? 'Your role cannot activate agents. Sign in as a founder or assurance lead.' : e.message; }
+      activateBusy = false;
+      await loadReady(); startKey = null; renderStart(); loadWorkforce();
+    };
     $('#start').onclick = async () => {
       if (startBusy) return;
       startBusy = true; $('#start').disabled = true; $('#start-err').textContent = '';
@@ -453,7 +479,7 @@ async function viewProject(pid) {
         items.push(`<div class="errcard" role="alert"><div class="title">${SYM.needs_attention('var(--red)')}${s ? esc(s.agent_name) + ' · ' + esc(s.tag) + esc(roundLabel(s)) : 'Project'}</div>
           <div class="wrap" style="margin-top:4px">${esc(m.text)}</div>${s ? actions(s) : ''}</div>`);
       } else {
-        items.push(`<div class="sysnote wrap">${esc(m.text)} · ${esc(time(m.created_at))}</div>`);
+        items.push(`<div class="sysnote wrap${m.kind === 'send_back' ? ' sendback' : ''}">${m.kind === 'send_back' ? '↺ ' : ''}${esc(m.text)} · ${esc(time(m.created_at))}</div>`);
       }
     }
     for (const s of st.steps.filter(s => s.status === 'in_progress')) {
@@ -470,6 +496,7 @@ async function viewProject(pid) {
         return `<section class="decision" aria-label="Your decision is needed">
           <div class="title">${SYM.needs_attention()} Your decision is needed <span class="asked">Asked by ${esc(a.agent_name)}</span></div>
           <div class="wrap">${esc(a.question || 'Can the team continue?')}</div>
+          ${a.why ? `<div class="muted small wrap"><strong>Why you decide here:</strong> ${esc(a.why)}</div>` : ''}
           <button class="toggle" data-fullreq="${esc(a.request_id)}" aria-expanded="${showFull}">${showFull ? I.chevDown : I.chev} Read the full request</button>
           ${showFull ? `<div class="full-req">${esc(m.text)}</div>` : ''}
           <div class="row">
@@ -507,21 +534,26 @@ async function viewProject(pid) {
       </form>`;
 
     // right panel
-    const visible = st.steps.filter(s => s.status !== 'skipped' || true);
+    const visible = st.steps;
     const done = st.counts.completed;
+    let lastBlock = null;
     $('#shell').classList.add('with-right'); const rp = $('#rightpanel'); rp.hidden = false;
     rp.innerHTML = `<div><div class="rp-title">Agents on this project</div><div class="muted small">${done} of ${st.counts.total} steps finished</div></div>
       <div class="rp-steps">${visible.map(s => {
+        const head = s.block && s.block !== lastBlock ? `<div class="rp-block">${esc(s.block)} · ${esc(s.block_label || '')}</div>` : '';
+        lastBlock = s.block || lastBlock;
         const awaiting = s.approval_id && pendingIds.has(s.approval_id);
         let line;
         if (s.status === 'completed') line = `<span class="muted">Completed · ${clock(s.elapsed_s)}</span>`;
         else if (s.status === 'in_progress') line = `<span style="color:var(--sky)">In progress… <span data-since="${esc(s.started_at)}">${clock(since(s.started_at))}</span></span>`;
         else if (s.status === 'needs_attention') line = awaiting ? `<span style="color:var(--amber)">Waiting for your decision</span>`
           : s.superseded ? `<span class="muted">Retried in a new round</span>` : `<span style="color:#ff8a9b" title="${esc(s.error || '')}">${esc((s.error || 'Needs attention').slice(0, 90))}${(s.error || '').length > 90 ? '…' : ''}</span>`;
-        else if (s.status === 'skipped') line = `<span class="faint">Skipped</span>`;
-        else line = `<span class="muted">${s.source_approval_id ? 'Queued · uses your note' : 'Queued'}</span>`;
-        return `<div class="rp-step${s.status === 'in_progress' ? ' cur' : ''}${s.status === 'needs_attention' && !s.superseded ? ' att' : ''}">${stepSym(s, pendingIds)}
-          <div><div class="n">${esc(s.agent_name)}${esc(roundLabel(s))}</div><div class="r">${esc(s.responsibility)}</div><div class="s">${line}</div></div></div>`;
+        else if (s.status === 'skipped') line = `<span class="faint" title="${esc(s.summary || '')}">Skipped${s.summary ? ' · ' + esc(s.summary.slice(0, 70)) + (s.summary.length > 70 ? '…' : '') : ''}</span>`;
+        else line = `<span class="muted">${s.source_approval_id ? 'Queued · uses your note' : (s.round > 1 ? 'Queued · new round' : 'Queued')}</span>`;
+        if (s.status === 'completed' && s.passed === false) line = `<span style="color:var(--amber)">Sent back · ${clock(s.elapsed_s)}</span>`;
+        const modeTag = s.mode === 'tool' ? ' <span class="tag" title="Runs in code, no model">code</span>' : '';
+        return `${head}<div class="rp-step${s.status === 'in_progress' ? ' cur' : ''}${s.status === 'needs_attention' && !s.superseded ? ' att' : ''}">${s.status === 'skipped' ? SYM.skipped() : stepSym(s, pendingIds)}
+          <div><div class="n">${esc(s.agent_name)}${esc(roundLabel(s))}${modeTag}</div><div class="r">${esc(s.responsibility)}</div><div class="s">${line}</div></div></div>`;
       }).join('') || '<div class="muted small">No steps yet.</div>'}</div>
       <div class="legend" aria-label="Legend"><div>${SYM.completed()} Completed</div><div>${SYM.in_progress()} In progress</div><div>${SYM.needs_attention()} Needs attention</div><div>${SYM.queued()} Queued</div></div>`;
 

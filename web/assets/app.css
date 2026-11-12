@@ -203,6 +203,10 @@ select.input { padding: 8px 12px; font-size: 13px; }
 .rp-title { font-weight: 700; font-size: 15px; }
 .rp-steps { display: flex; flex-direction: column; gap: 12px; }
 .rp-step { display: grid; grid-template-columns: 20px 1fr; gap: 8px; }
+.rp-block { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px; }
+.rp-block:first-child { border-top: 0; padding-top: 0; }
+.rp-step .tag { font-size: 10px; padding: 0 6px; margin-left: 4px; }
+.sysnote.sendback { color: var(--amber); }
 .rp-step .n { font-weight: 600; font-size: 13.5px; }
 .rp-step .r { color: var(--muted); font-size: 12px; }
 .rp-step .s { font-size: 12px; }

@@ -25,6 +25,7 @@ class Vitaran(BaseAgent):
     agent_type = "thinking"
 
     AUTHORITY = {
+        "ops.assign_packages": True,
         "ops.distribute_resources": True,
         "ops.allocate_resources": True,
         "ops.balance_load": True,
@@ -249,3 +250,18 @@ HARD RULES — NEVER VIOLATE
             "status": "pending_human_approval",
             "routed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @authority_guard("ops.assign_packages")
+    def assign_packages(self, packages: list, routing: dict, active_agents: list) -> dict:
+        """Assign each package to the qualified agents for its type; only Active agents qualify."""
+        active = set(active_agents or [])
+        out, unassigned = [], []
+        for p in packages or []:
+            wanted = (routing or {}).get(p.get("type"), [])
+            got = [a for a in wanted if a in active]
+            if not got or len(got) < len(wanted):
+                unassigned.append(p.get("package_id"))
+            out.append({**p, "assigned_to": got})
+        return {"assignments": out, "unassigned": unassigned,
+                "status": "assigned" if not unassigned else "blocked_unassigned",
+                "assigned_at": datetime.now(timezone.utc).isoformat()}

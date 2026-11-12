@@ -1,19 +1,18 @@
-"""Tests for the Control Room project flow (additive).
+"""Tests for the Control Room project flow: the documented chain (How a Project Runs).
 
-The runner's dispatch is replaced with a stub so no model or worker is needed;
-everything else (readiness, start, decisions, rounds, workforce counts) runs
-against the SQLite test database.
+Model steps are replaced with a stub so no model or worker is needed. Code steps run the
+agents' real tools (Sankalan, Swasthya, Gopniya, Pramaan, Sweekriti, Lagaat, ...).
 """
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
-from backend.models import Agent, Approval
-from backend.models.projects import ApprovalDecision, Project, ProjectMessage, ProjectStep  # registers tables
-from backend.projects import runner as R
-from backend.projects import queries as Q
-from backend.projects.flow import get_flow, required_agents
-from backend.projects.readable import one_line, readable
 from backend.database import async_session_maker
+from backend.models import Agent, Approval
+from backend.models.projects import ApprovalDecision, Project, ProjectStep  # registers tables
+from backend.projects import queries as Q
+from backend.projects import runner as R
+from backend.projects.flow import get_flow, required_agents, step_keys
+from backend.projects.readable import one_line, readable
 
 
 # ---------------------------------------------------------------------------
@@ -31,20 +30,35 @@ def test_readable_drops_code_blocks_and_markdown():
     assert "Three posts" in out and "• item one" in out
 
 
-def test_readable_only_code():
-    assert readable("```js\nconsole.log(1)\n```") == "The agent returned only code, which is not shown here."
-
-
 def test_one_line_prefers_a_sentence_over_a_heading():
     assert one_line("Client Brief Capture\n\nThe brand tone is calm and reassuring. More.") == \
         "The brand tone is calm and reassuring."
 
 
 # ---------------------------------------------------------------------------
-# helpers
+# the documented chain
 # ---------------------------------------------------------------------------
 
-FLOW_AGENTS = required_agents(get_flow())
+FLOW = get_flow()
+FLOW_AGENTS = required_agents(FLOW)
+
+
+def test_flow_follows_the_document_order():
+    keys = step_keys(FLOW)
+    assert keys[0] == "start_check" and keys[1] == "kickoff" and keys[-1] == "final_brief"
+    order = ["kickoff", "client_expectations", "client_context", "brief", "workflow", "delivery_plan",
+             "work_packages", "schedule", "resources", "capacity", "assignments", "pipeline",
+             "creative_request", "research", "direction", "calendar", "distribution", "writing",
+             "design_brief", "artwork", "shuddhi", "pariksha", "gunvatta", "swasthya", "gopniya",
+             "nirikshan", "pramaan", "sweekriti", "client_update", "publishing", "client_report",
+             "costing", "intelligence", "kpi_status", "review_notes", "close_actions", "final_brief"]
+    positions = [keys.index(k) for k in order]
+    assert positions == sorted(positions)
+    agents = {s["key"]: s["agent"] for s in FLOW["steps"]}
+    assert agents["kickoff"] == agents["final_brief"] == "SAM-AG-001"          # Arjun opens and closes
+    assert agents["actions"] == agents["close_actions"] == "SAM-AG-013"        # Samanvay twice
+    gates = [s["key"] for s in FLOW["steps"] if s.get("approval")]
+    assert gates == ["distribution", "sweekriti"]                             # Gate 1 and Gate 2
 
 
 async def _ensure_agents(status: str) -> None:
@@ -54,8 +68,8 @@ async def _ensure_agents(status: str) -> None:
         for cid in FLOW_AGENTS:
             a = existing.get(cid)
             if a is None:
-                s.add(Agent(canonical_id=cid, name=cid, designation="Test agent", position_id="POS-T",
-                            department="Content", department_code="CONT", stage="P1-P2",
+                s.add(Agent(canonical_id=cid, name=cid, designation="Test agent", position_id=f"T-{cid[-3:]}",
+                            department="Test", department_code="TST", stage="P1-P2",
                             human_owner="test", technical_custodian="test", evaluator="test",
                             autonomy="bounded", priority="P1", agent_type="thinking",
                             target_competency="C3", status=status))
@@ -68,161 +82,197 @@ async def _new_project(name="Test project") -> str:
     from backend.projects.common import new_project_id
     pid = new_project_id()
     async with async_session_maker() as s:
-        s.add(Project(id=pid, name=name, client_id="TEST", flow_key="content_production",
+        s.add(Project(id=pid, name=name, client_id="TEST", flow_key="documented_chain",
                       status="draft", created_by="tester"))
         await s.commit()
     return pid
 
 
 @pytest.fixture
-def no_dispatch(monkeypatch):
-    """Never start real agent runs in these tests."""
+def no_kick(monkeypatch):
     monkeypatch.setattr(R.runner, "kick", lambda *a, **k: None)
 
 
-# ---------------------------------------------------------------------------
-# start rules
-# ---------------------------------------------------------------------------
+def stub(monkeypatch, writer_text="Post 1: Eat well and walk daily. Ask your doctor about a sugar check.",
+         verdicts=None, seen=None):
+    """Replace model steps with fixed text. verdicts: {agent: [verdict line, ...]} consumed in order."""
+    verdicts = {k: list(v) for k, v in (verdicts or {}).items()}
 
-async def test_start_refused_when_agents_not_active(no_dispatch):
+    async def fake_dispatch(args, kwargs, on_ref):
+        await on_ref("test")
+        agent, task = args[0], args[1]
+        if seen is not None:
+            seen.setdefault(agent, []).append((task, kwargs.get("context", {})))
+        if agent == "SAM-AG-082":
+            text = writer_text() if callable(writer_text) else writer_text
+        else:
+            text = f"{agent} finished its step. It is described in plain words here."
+        if "VERDICT" in task:
+            queue = verdicts.get(agent) or []
+            text += "\n" + (queue.pop(0) if queue else "VERDICT: PASS")
+        return {"status": "completed", "execution_id": f"exec-test-{agent}", "output": text}
+    monkeypatch.setattr(R.dispatcher, "dispatch", fake_dispatch)
+
+
+async def run_until_blocked(pid):
+    while await R.runner._advance(pid):
+        pass
+    return await Q.project_state(pid)
+
+
+def steps_of(st, key):
+    return [x for x in st["steps"] if x["step_key"] == key]
+
+
+async def test_start_refused_when_agents_not_active(no_kick):
     await _ensure_agents("proposed")
     pid = await _new_project()
     with pytest.raises(R.ProjectError) as e:
         await R.start_project(pid, "go", "tester")
     assert e.value.status == 409
     assert {a["canonical_id"] for a in e.value.detail["not_active"]} == set(FLOW_AGENTS)
-    async with async_session_maker() as s:
-        assert (await s.get(Project, pid)).status == "draft"
 
 
-async def test_start_creates_steps_once(no_dispatch):
+async def test_start_creates_every_chain_step_once(no_kick):
     await _ensure_agents("active")
     pid = await _new_project()
     await R.start_project(pid, "Make 3 posts", "tester")
     with pytest.raises(R.ProjectError):
-        await R.start_project(pid, "again", "tester")  # double click is refused
+        await R.start_project(pid, "again", "tester")
     st = await Q.project_state(pid)
-    assert st["project"]["status"] == "running"
-    assert [x["step_key"] for x in st["steps"]] == [d["key"] for d in get_flow()["steps"]]
-    assert st["messages"][0]["author_type"] == "human" and st["messages"][0]["text"] == "Make 3 posts"
+    assert [x["step_key"] for x in st["steps"]] == step_keys(FLOW)
+    assert st["steps"][1]["block"] == 2 and st["steps"][1]["block_label"] == "Kick-off"
 
 
-async def test_runner_refuses_inactive_agent(monkeypatch):
+async def test_inactive_agent_is_never_dispatched(monkeypatch, no_kick):
     await _ensure_agents("active")
-    monkeypatch.setattr(R.runner, "kick", lambda *a, **k: None)
     pid = await _new_project()
     await R.start_project(pid, None, "tester")
     async with async_session_maker() as s:
-        first = (await s.execute(select(Agent).where(Agent.canonical_id == FLOW_AGENTS[0]))).scalars().first()
-        first.status = "restricted"
+        arjun = (await s.execute(select(Agent).where(Agent.canonical_id == "SAM-AG-001"))).scalars().first()
+        arjun.status = "restricted"
         await s.commit()
 
     async def boom(*a, **k):
         raise AssertionError("an inactive agent must not be dispatched")
     monkeypatch.setattr(R.dispatcher, "dispatch", boom)
-    assert await R.runner._advance(pid) is False
-    st = await Q.project_state(pid)
+    st = await run_until_blocked(pid)
     assert st["project"]["status"] == "needs_attention"
-    assert st["steps"][0]["status"] == "needs_attention" and "not Active" in st["steps"][0]["error"]
+    kick = steps_of(st, "kickoff")[0]
+    assert kick["status"] == "needs_attention" and "not Active" in kick["error"]
+    assert steps_of(st, "start_check")[0]["status"] == "completed"   # Adhikar's code check ran
     await _ensure_agents("active")
 
 
-# ---------------------------------------------------------------------------
-# full pass with a stubbed dispatch: approvals, rounds, decisions
-# ---------------------------------------------------------------------------
-
-async def _run_until_blocked(pid, monkeypatch, outputs):
-    async def fake_dispatch(args, kwargs, on_ref):
-        await on_ref("test")
-        agent = args[0]
-        text = outputs.get(agent, f"{agent} did the work. It is described in plain words here.")
-        return {"status": "completed", "execution_id": f"exec-test-{agent}", "output": text}
-    monkeypatch.setattr(R.dispatcher, "dispatch", fake_dispatch)
-    while await R.runner._advance(pid):
-        pass
-
-
-async def test_approval_flow_with_changes_creates_new_rounds(monkeypatch, no_dispatch):
+async def test_full_chain_with_both_gates(monkeypatch, no_kick):
     await _ensure_agents("active")
     pid = await _new_project()
-    await R.start_project(pid, None, "tester")
-    await _run_until_blocked(pid, monkeypatch, {"SAM-AG-049": '{"tone": "calm"}'})
-    st = await Q.project_state(pid)
-    pending = st["pending_approval"]
-    assert pending is not None and pending["agent_id"] == "SAM-AG-080"
-    assert "{" not in st["messages"][1]["text"]  # JSON was turned into readable text
-
-    # sidebar: the asking agent is counted as awaiting approval, counts add up
-    wf = await Q.workforce()
-    c = wf["counts"]
-    assert c["active"] + c["awaiting_approval"] + c["on_standby"] + c["not_deployed"] == wf["total"]
-    assert next(a for a in wf["agents"] if a["canonical_id"] == "SAM-AG-080")["state"] == "awaiting_approval"
-
-    with pytest.raises(R.ProjectError):
-        await R.decide(pid, pending["request_id"], "approve_with_changes", "  ", "tester")  # note required
-    await R.decide(pid, pending["request_id"], "approve_with_changes", "Remove the word naturally.", "tester")
-    with pytest.raises(R.ProjectError) as again:
-        await R.decide(pid, pending["request_id"], "approve", None, "tester")  # recorded once
-    assert again.value.status == 409
-
-    st = await Q.project_state(pid)
-    keys = [(x["step_key"], x["round"], x["status"]) for x in st["steps"]]
-    i = keys.index(("compliance", 1, "completed"))
-    assert keys[i + 1][:2] == ("writing", 2) and keys[i + 2][:2] == ("compliance", 2)
-    assert ("writing", 1, "completed") in keys  # earlier round kept
-    async with async_session_maker() as s:
-        appr = (await s.execute(select(Approval).where(Approval.request_id == pending["request_id"]))).scalars().first()
-        dec = (await s.execute(select(ApprovalDecision).where(
-            ApprovalDecision.request_id == pending["request_id"]))).scalars().first()
-    assert appr.decision == "approve" and appr.decided_by == "tester"
-    assert dec.decision == "approve_with_changes" and dec.note == "Remove the word naturally."
-
-    # the revision round receives the human note
     seen = {}
+    stub(monkeypatch, seen=seen)
+    await R.start_project(pid, "Create 4 short posts about early signs of diabetes.", "tester")
 
-    async def capture(args, kwargs, on_ref):
-        await on_ref("test")
-        seen.setdefault(args[0], (args[1], kwargs["context"]))
-        return {"status": "completed", "execution_id": "exec-x", "output": "Rewrote the captions as asked."}
-    monkeypatch.setattr(R.dispatcher, "dispatch", capture)
-    while await R.runner._advance(pid):
-        pass
-    task_text, ctx = seen["SAM-AG-082"]
-    assert "Remove the word naturally." in task_text and ctx["revision_note"] == "Remove the word naturally."
+    st = await run_until_blocked(pid)
+    gate1 = st["pending_approval"]
+    assert gate1 and gate1["agent_id"] == "SAM-AG-079" and gate1["why"]              # Tarangini, Gate 1
+    packages = steps_of(st, "work_packages")[0]["result"]
+    assert packages["package_count"] == 4                                             # scope from the message
+    assert steps_of(st, "assignments")[0]["result"]["status"] == "assigned"
+    assert steps_of(st, "capacity")[0]["result"]["status"] == "capacity_ok"
+
+    await R.decide(pid, gate1["request_id"], "approve_with_changes", "Make the tone warmer.", "tester")
+    st = await Q.project_state(pid)
+    assert [x["round"] for x in steps_of(st, "direction")] == [1, 2]
+    assert [x["round"] for x in steps_of(st, "distribution")] == [1, 2]
+    st = await run_until_blocked(pid)
+    disha_round2_task, _ = seen["SAM-AG-076"][-1]
+    assert "Make the tone warmer." in disha_round2_task
+
+    gate1b = st["pending_approval"]
+    assert gate1b["agent_id"] == "SAM-AG-079"
+    await R.decide(pid, gate1b["request_id"], "approve", None, "tester")
+    st = await run_until_blocked(pid)
+
+    gate2 = st["pending_approval"]
+    assert gate2 and gate2["agent_id"] == "SAM-AG-052"                                # Sweekriti, Gate 2
+    assert steps_of(st, "pramaan")[0]["result"]["accepted"] is True
+    assert steps_of(st, "swasthya")[0]["result"]["status"] == "pass"
+    await R.decide(pid, gate2["request_id"], "approve", None, "tester")
+    st = await run_until_blocked(pid)
+
+    assert st["project"]["status"] == "completed"
+    skipped = [x["step_key"] for x in st["steps"] if x["status"] == "skipped"]
+    assert skipped == ["data_collection", "data_cleaning", "data_matching", "kpi_values", "performance", "dashboards"]
+    assert all(x["summary"] for x in st["steps"] if x["status"] == "skipped")       # every skip has a reason
+    cost = steps_of(st, "costing")[0]["result"]
+    assert cost["accepted_deliverables"] == 4 and cost["total_cost"] == "unavailable"
+    assert steps_of(st, "final_brief")[0]["status"] == "completed"
+    summary = await Q.summary(pid)
+    assert {d["name"] for d in summary["deliverables"]} >= {"Copy", "Design brief", "Client report"}
 
 
-async def test_reject_then_retry_and_finish(monkeypatch, no_dispatch):
+async def test_claim_check_sends_work_back_and_stops_at_round_limit(monkeypatch, no_kick):
     await _ensure_agents("active")
     pid = await _new_project()
+    seen = {}
+    stub(monkeypatch, writer_text="This tea is a guaranteed cure for diabetes.", seen=seen)
     await R.start_project(pid, None, "tester")
-    await _run_until_blocked(pid, monkeypatch, {})
-    pending = (await Q.project_state(pid))["pending_approval"]
-    await R.decide(pid, pending["request_id"], "reject", "Claim cannot be supported.", "tester")
+    st = await run_until_blocked(pid)
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")   # Gate 1
+    st = await run_until_blocked(pid)
+
+    rework = steps_of(st, "rework")
+    assert len(rework) == 4                                       # 3 allowed rounds + the one that escalates
+    assert rework[-1]["status"] == "needs_attention" and "Round limit" in rework[-1]["error"]
+    assert [x["round"] for x in steps_of(st, "writing")] == [1, 2, 3, 4]
+    assert all(x["result"]["status"] == "block" for x in steps_of(st, "swasthya"))
+    assert st["project"]["status"] == "needs_attention"
+    lekha_round2_task, ctx = seen["SAM-AG-082"][1]
+    assert "guaranteed cure" in lekha_round2_task and ctx["revision_note"]
+    assert not steps_of(st, "sweekriti")[0]["approval_id"]        # never reached Gate 2
+
+
+async def test_shuddhi_send_back_then_pass(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch, verdicts={"SAM-AG-080": ["VERDICT: SEND BACK - caption 2 claims too much"]})
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    st = await run_until_blocked(pid)
+    shuddhi = steps_of(st, "shuddhi")
+    assert [x["passed"] for x in shuddhi] == [False, True]
+    assert "caption 2" in shuddhi[0]["result"]["reasons"]
+    assert len(steps_of(st, "rework")) == 1 and steps_of(st, "rework")[0]["status"] == "completed"
+    assert st["pending_approval"]["agent_id"] == "SAM-AG-052"     # reached Gate 2 after the fix
+
+
+async def test_reject_at_gate2_then_retry_reruns_the_checks(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch)
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    st = await run_until_blocked(pid)
+    gate2 = st["pending_approval"]
+    await R.decide(pid, gate2["request_id"], "reject", "Too salesy.", "tester")
+    with pytest.raises(R.ProjectError) as again:
+        await R.decide(pid, gate2["request_id"], "approve", None, "tester")
+    assert again.value.status == 409
     st = await Q.project_state(pid)
     assert st["project"]["status"] == "needs_attention"
-    rejected = next(x for x in st["steps"] if x["approval_id"] == pending["request_id"])
-    assert rejected["status"] == "needs_attention" and "Rejected by tester" in rejected["error"]
-
+    rejected = next(x for x in st["steps"] if x["approval_id"] == gate2["request_id"])
     await R.retry_step(pid, rejected["id"], "tester")
-    with pytest.raises(R.ProjectError):
-        await R.retry_step(pid, rejected["id"], "tester")  # retried only once
-    await _run_until_blocked(pid, monkeypatch, {})
-    # approve every remaining request until the project completes
-    for _ in range(5):
-        st = await Q.project_state(pid)
-        if st["pending_approval"] is None:
-            break
-        await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
-        await _run_until_blocked(pid, monkeypatch, {})
-    st = await Q.project_state(pid)
-    assert st["project"]["status"] == "completed"
-    summ = await Q.summary(pid)
-    assert summ["tiles"]["human_approvals"] >= 3
-    assert {d["name"] for d in summ["deliverables"]} == {"Copy", "Design brief", "Review report"}
-    assert any(h["id"] == pid for h in await Q.history())
+    st = await run_until_blocked(pid)
+    for key in ("writing", "shuddhi", "swasthya", "pramaan", "sweekriti"):
+        assert len(steps_of(st, key)) == 2, key
+    async with async_session_maker() as s:
+        dec = (await s.execute(select(ApprovalDecision).where(
+            ApprovalDecision.request_id == gate2["request_id"]))).scalars().first()
+    assert dec.decision == "reject" and dec.note == "Too salesy."
 
 
-async def test_model_unavailable_is_reported_not_invented(monkeypatch, no_dispatch):
+async def test_model_unavailable_is_reported_not_invented(monkeypatch, no_kick):
     await _ensure_agents("active")
     pid = await _new_project()
     await R.start_project(pid, None, "tester")
@@ -230,10 +280,19 @@ async def test_model_unavailable_is_reported_not_invented(monkeypatch, no_dispat
     async def down(args, kwargs, on_ref):
         await on_ref("test")
         return {"status": "completed", "execution_id": "exec-down",
-                "output": "[MODEL UNAVAILABLE] connection refused. Smriti cannot produce output."}
+                "output": "[MODEL UNAVAILABLE] connection refused. Arjun cannot produce output."}
     monkeypatch.setattr(R.dispatcher, "dispatch", down)
-    assert await R.runner._advance(pid) is False
-    st = await Q.project_state(pid)
-    assert st["steps"][0]["status"] == "needs_attention"
-    assert st["steps"][0]["error"].startswith("Model unavailable")
-    assert not any(m["author_type"] == "agent" for m in st["messages"])
+    st = await run_until_blocked(pid)
+    kick = steps_of(st, "kickoff")[0]
+    assert kick["status"] == "needs_attention" and kick["error"].startswith("Model unavailable")
+    assert not any(m["author_type"] == "agent" and m["agent_id"] == "SAM-AG-001" for m in st["messages"])
+
+
+async def test_activate_needed_uses_the_gate(no_kick):
+    await _ensure_agents("proposed")
+    result = await R.activate_needed("tester")
+    assert result["activated"] >= 1
+    ready = await R.readiness()
+    # every agent that passed the gate is now Active; any that failed is listed with a reason
+    assert {f["canonical_id"] for f in result["failed"]} == {a["canonical_id"] for a in ready["not_active"]}
+    await _ensure_agents("active")

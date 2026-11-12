@@ -111,16 +111,29 @@ python -m scripts.run_all
 - Previous UI: `http://localhost:8000/legacy/` (agent detail, activation gate, lifecycle transitions)
 - API docs: `http://localhost:8000/docs`
 
-A project runs the flow in `config/project_flows.yaml` (Smriti → Anvesh → Yojana →
-Lekha → Roop → Shuddhi → Pariksha, mapped onto Daksh's delivery stages). The
-runner (`backend/projects/`) only dispatches the existing `run_agent_task`
-Celery task; it refuses agents that are not Active, checks each step's
-permission with the authority guard, and asks a signed-in human for approval
-after the compliance check and the final review. Without Redis the same task
-runs in a local process and the UI polls every 5 seconds.
+A project runs the documented chain in `config/project_flows.yaml`, taken from
+"How a Project Runs" and the PDF pilot sequence (Document 01C §7): 10 blocks from the start
+check (Adhikar) and kick-off (Arjun, Samanvay) through client understanding (Mitra, Smriti,
+Shruti), delivery planning (Daksh, Yojana, Sankalan, Samay, Niyojan, Kshamata, Vitaran,
+Pravartan), content decisions (Aarya, Anvesh, Disha, Kalpana, Tarangini), production (Lekha,
+Roop, Chitra), checks (Shuddhi, Pariksha, Gunvatta, Swasthya, Gopniya, Nirikshan, Pramaan,
+Sweekriti), publishing, measurement and close (Arjun's final brief).
+
+- Model steps run the agent through the existing `run_agent_task` Celery task; code steps run the
+  agent's own authority-guarded tool (work packages, schedule, assignments, claim screening,
+  privacy check, acceptance, cost); steps with no real data yet are recorded as skipped with
+  the reason.
+- Checkers send work back: Punargathan opens a rework round, Lekha/Roop/Chitra run again and
+  every check repeats; after 3 rounds a human decides.
+- Human Gate 1 after Tarangini (direction and calendar) and Gate 2 after Sweekriti (final
+  content). "Approve with changes" re-runs the documented steps with your note.
+- The runner refuses agents that are not Active and checks every step's permission. The start
+  screen can run the existing activation gate for all missing agents in one click (signed-in
+  founder or assurance lead); agents that fail the gate stay inactive.
 
 New tables (Alembic migration `migrations/versions/0001_project_tables.py`):
-`projects`, `project_messages`, `project_steps`, `approval_decisions`.
+`projects`, `project_messages`, `project_steps`, `approval_decisions`;
+migration `0002_step_result_json.py` adds `project_steps.result_json`.
 
 ## Adding a new agent
 

@@ -23,6 +23,7 @@ class Samay(BaseAgent):
     agent_type = "thinking"
 
     AUTHORITY = {
+        "ops.schedule_packages": True,
         "ops.manage_time": True,
         "ops.track_time": True,
         "ops.optimize_schedule": True,
@@ -242,3 +243,17 @@ HARD RULES — NEVER VIOLATE
             "status": "pending_human_approval",
             "routed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @authority_guard("ops.schedule_packages")
+    def schedule_packages(self, packages: list, start_date: str, days: int = 30) -> dict:
+        """Give every work package a deadline, spread evenly over the period."""
+        from datetime import timedelta
+        start = datetime.fromisoformat(start_date[:10])
+        n = len(packages or [])
+        out = []
+        for i, p in enumerate(packages or []):
+            due = start + timedelta(days=round(days * (i + 1) / max(n, 1)))
+            out.append({**p, "due_date": due.date().isoformat()})
+        return {"packages": out, "count": n, "period_days": days,
+                "status": "scheduled" if n else "nothing_to_schedule",
+                "scheduled_at": datetime.now(timezone.utc).isoformat()}

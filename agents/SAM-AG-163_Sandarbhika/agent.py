@@ -3,6 +3,7 @@
 Stage 1B service-first agent. Fetches the right client context for each task.
 Service-first: context retrieval service (tenant-scoped, deterministic).
 """
+from datetime import datetime, timezone
 from agents.base import BaseAgent, AgentResult, register_agent
 from backend.core.authority import authority_guard
 
@@ -43,4 +44,19 @@ class Sandarbhika(BaseAgent):
             "scope": scope,
             "records": [],  # placeholder — real impl queries DB scoped by tenant_id
             "retrieved_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        }
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
         }

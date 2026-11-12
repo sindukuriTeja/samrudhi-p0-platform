@@ -23,6 +23,7 @@ class Kshamata(BaseAgent):
     agent_type = "thinking"
 
     AUTHORITY = {
+        "ops.check_capacity": True,
         "ops.manage_capacity": True,
         "ops.track_capacity": True,
         "ops.forecast_capacity": True,
@@ -246,3 +247,15 @@ HARD RULES — NEVER VIOLATE
             "status": "pending_human_approval",
             "routed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @authority_guard("ops.check_capacity")
+    def check_capacity(self, packages: list, routing: dict, max_per_agent: int = 10) -> dict:
+        """Count the planned packages per producing agent (from routing) and warn when one is over its limit."""
+        load = {}
+        for p in packages or []:
+            for agent in (routing or {}).get(p.get("type"), []):
+                load[agent] = load.get(agent, 0) + 1
+        over = {k: v for k, v in load.items() if v > max_per_agent}
+        return {"load": load, "max_per_agent": max_per_agent, "overloaded": over,
+                "status": "capacity_ok" if not over else "capacity_warning",
+                "checked_at": datetime.now(timezone.utc).isoformat()}
