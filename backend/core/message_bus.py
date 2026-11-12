@@ -89,6 +89,21 @@ class MessageBus:
 
         return envelope.event_id
 
+    def publish_sync(self, envelope: BusEnvelope) -> str:
+        """Synchronous wrapper for publish — for use from sync agent classes.
+
+        Runs the async publish in a dedicated event loop. Safe to call from
+        non-async contexts (e.g. agent.run()).
+        """
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop = asyncio.new_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+        return loop.run_until_complete(self.publish(envelope))
+
     async def query_events(
         self,
         *,

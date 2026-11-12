@@ -72,7 +72,7 @@ HARD RULES — NEVER VIOLATE:
                 status="failed",
             )
         try:
-            bus.publish(BusEnvelope(
+            bus.publish_sync(BusEnvelope(
                 event_type="gov.evidence_op",
                 source_agent=self.canonical_id,
                 target_agent="all",

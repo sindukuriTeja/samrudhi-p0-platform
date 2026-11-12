@@ -34,7 +34,7 @@ def run_agent_task(
 
     # Lazy import the agent registry
     try:
-        from agents.registry import get_agent_module
+        from agents.base import get_agent_module
         agent_mod = get_agent_module(canonical_id)
     except Exception as e:
         return {

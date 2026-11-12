@@ -85,7 +85,7 @@ HARD RULES — NEVER VIOLATE
                 status="failed",
             )
         try:
-            bus.publish(BusEnvelope(
+            bus.publish_sync(BusEnvelope(
                 event_type="crt.review",
                 source_agent=self.canonical_id,
                 target_agent="all",

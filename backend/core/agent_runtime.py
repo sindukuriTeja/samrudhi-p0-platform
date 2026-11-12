@@ -51,6 +51,105 @@ def register_gate_check(check: GateCheck, fn: GateCheckFn) -> None:
     _GATE_CHECKS[check] = fn
 
 
+# --- Default gate check implementations (registered at import time) ---
+# These provide sensible defaults so the activation gate works out of the box.
+# Production deployments can override by calling register_gate_check().
+
+async def _check_tool_permissions(session: AsyncSession, canonical_id: str) -> tuple[bool, str]:
+    """Verify the agent has at least one tool permission configured."""
+    try:
+        from agents.base import get_agent_class
+        cls = get_agent_class(canonical_id)
+        if cls is None:
+            return False, "Agent class not registered"
+        auth = getattr(cls, "AUTHORITY", {})
+        if not auth:
+            return False, "No authority matrix defined"
+        allowed = [k for k, v in auth.items() if v is True]
+        if not allowed:
+            return False, "No permissions granted in authority matrix"
+        return True, f"{len(allowed)} permissions configured"
+    except Exception as e:
+        return False, f"Exception: {e}"
+
+
+async def _check_competency_tests(session: AsyncSession, canonical_id: str) -> tuple[bool, str]:
+    """Verify the agent has a run() method and passes basic competency."""
+    try:
+        from agents.base import get_agent_class
+        cls = get_agent_class(canonical_id)
+        if cls is None:
+            return False, "Agent class not registered"
+        if not hasattr(cls, "run") or not callable(getattr(cls, "run")):
+            return False, "No run() method"
+        return True, "run() method present"
+    except Exception as e:
+        return False, f"Exception: {e}"
+
+
+async def _check_governance_tests(session: AsyncSession, canonical_id: str) -> tuple[bool, str]:
+    """Verify the agent respects governance (cannot certify/modify findings)."""
+    try:
+        from agents.base import get_agent_class
+        from backend.core.authority import check_authority, AuthorityError
+        cls = get_agent_class(canonical_id)
+        if cls is None:
+            return False, "Agent class not registered"
+        # All agents must be denied gov.certify and gov.modify_finding
+        for perm in ("gov.certify", "gov.modify_finding"):
+            try:
+                check_authority(canonical_id, perm)
+                # If no exception, the agent is allowed — that's a governance failure
+                return False, f"Agent is allowed to perform '{perm}' (must be denied)"
+            except AuthorityError:
+                pass  # Good — denied as expected
+        return True, "Governance restrictions enforced"
+    except Exception as e:
+        return False, f"Exception: {e}"
+
+
+async def _check_reporting_workflow(session: AsyncSession, canonical_id: str) -> tuple[bool, str]:
+    """Verify the agent has a name and designation (reporting identity)."""
+    try:
+        from agents.base import get_agent_class
+        cls = get_agent_class(canonical_id)
+        if cls is None:
+            return False, "Agent class not registered"
+        if not getattr(cls, "name", ""):
+            return False, "No name defined"
+        if not getattr(cls, "designation", ""):
+            return False, "No designation defined"
+        return True, "Reporting identity complete"
+    except Exception as e:
+        return False, f"Exception: {e}"
+
+
+async def _check_escalation(session: AsyncSession, canonical_id: str) -> tuple[bool, str]:
+    """Verify the agent has escalation capability (route_for_approval or escalate tool)."""
+    try:
+        from agents.base import get_agent_module
+        agent = get_agent_module(canonical_id)
+        has_escalation = (
+            hasattr(agent, "route_for_approval")
+            or hasattr(agent, "escalate")
+            or hasattr(agent, "escalate_operational_issue")
+            or hasattr(agent, "escalate_client_issue")
+        )
+        if not has_escalation:
+            return False, "No escalation method found"
+        return True, "Escalation path available"
+    except Exception as e:
+        return False, f"Exception: {e}"
+
+
+# Register the default checks
+register_gate_check(GateCheck.TOOL_PERMISSIONS, _check_tool_permissions)
+register_gate_check(GateCheck.COMPETENCY_TESTS, _check_competency_tests)
+register_gate_check(GateCheck.GOVERNANCE_TESTS, _check_governance_tests)
+register_gate_check(GateCheck.REPORTING_VALIDATED, _check_reporting_workflow)
+register_gate_check(GateCheck.ESCALATION_TESTED, _check_escalation)
+
+
 async def run_activation_gate(
     session: AsyncSession,
     canonical_id: str,

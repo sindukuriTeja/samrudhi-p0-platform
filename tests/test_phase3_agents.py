@@ -1,7 +1,7 @@
 """Comprehensive tests for Phase 3 Ops/Client/Analytics/CEO agents.
 
 Covers all 29 Phase 3 agents across four domains:
-- Operations (under Daksh SAM-AG-002): Samanvay(013), Niyojan(060), Pravartan(061),
+- Operations (under Daksh SAM-AG-002): Samanvay(063), Niyojan(060), Pravartan(061),
   Nirikshan(062), Sankalan(064), Samay(065), Vitaran(069), Kshamata(067), Gati(068),
   Suchak(070), Punargathan(071), Pramaan(072)
 - Client Experience (under Mitra SAM-AG-004): Sneha(044), Saarthi(045), Swagat(048),
@@ -20,7 +20,7 @@ from backend.core.authority import AuthorityError, load_authority_matrix
 
 
 PHASE3_IDS = [
-    "SAM-AG-013", "SAM-AG-060", "SAM-AG-061", "SAM-AG-062",
+    "SAM-AG-063", "SAM-AG-060", "SAM-AG-061", "SAM-AG-062",
     "SAM-AG-064", "SAM-AG-065", "SAM-AG-069", "SAM-AG-067",
     "SAM-AG-068", "SAM-AG-070", "SAM-AG-071", "SAM-AG-072",
     "SAM-AG-044", "SAM-AG-045", "SAM-AG-048", "SAM-AG-051",
@@ -31,7 +31,7 @@ PHASE3_IDS = [
 ]
 
 PHASE3_NAMES = {
-    "SAM-AG-013": "Samanvay", "SAM-AG-060": "Niyojan", "SAM-AG-061": "Pravartan",
+    "SAM-AG-063": "Samanvay", "SAM-AG-060": "Niyojan", "SAM-AG-061": "Pravartan",
     "SAM-AG-062": "Nirikshan", "SAM-AG-064": "Sankalan", "SAM-AG-065": "Samay",
     "SAM-AG-069": "Vitaran", "SAM-AG-067": "Kshamata", "SAM-AG-068": "Gati",
     "SAM-AG-070": "Suchak", "SAM-AG-071": "Punargathan", "SAM-AG-072": "Pramaan",
@@ -44,7 +44,7 @@ PHASE3_NAMES = {
     "SAM-AG-066": "Lakshya", "SAM-AG-130": "Chetak",
 }
 
-OPS_IDS = ["SAM-AG-013", "SAM-AG-060", "SAM-AG-061", "SAM-AG-062", "SAM-AG-064",
+OPS_IDS = ["SAM-AG-063", "SAM-AG-060", "SAM-AG-061", "SAM-AG-062", "SAM-AG-064",
            "SAM-AG-065", "SAM-AG-069", "SAM-AG-067", "SAM-AG-068", "SAM-AG-070",
            "SAM-AG-071", "SAM-AG-072"]
 CEX_IDS = ["SAM-AG-044", "SAM-AG-045", "SAM-AG-048", "SAM-AG-051",
@@ -121,7 +121,7 @@ class TestPhase3AuthorityEnforcement:
             assert m.get("tec.grant_access") is False, f"{cid} has tec.grant_access!"
 
     def test_samanvay_ops_authority(self):
-        m = load_authority_matrix("SAM-AG-013")
+        m = load_authority_matrix("SAM-AG-063")
         assert m.get("ops.coordinate_operations") is True
         assert m.get("ops.resolve_blocker") is True
 
@@ -150,7 +150,7 @@ class TestPhase3OpsAuthorityDecorator:
         return _REGISTRY[cid]()
 
     def test_samanvay_coordinate_operations(self):
-        a = self._make("SAM-AG-013")
+        a = self._make("SAM-AG-063")
         result = a.coordinate_operations(workflow_ids=["WF-001"], departments=["content","design"])
         assert isinstance(result, dict)
         assert result.get("coordination_id") is not None
@@ -360,7 +360,7 @@ class TestPhase3ReadonlyMethods:
         return _REGISTRY[cid]()
 
     def test_samanvay_list_coordinations(self):
-        a = self._make("SAM-AG-013")
+        a = self._make("SAM-AG-063")
         result = a.list_coordinations()
         assert isinstance(result, dict)
         assert result.get("count") == 0
@@ -413,9 +413,9 @@ class TestPhase3RouteForApproval:
 
 class TestPhase3RunMethod:
     def test_samanvay_run(self):
-        a = _REGISTRY["SAM-AG-013"]()
+        a = _REGISTRY["SAM-AG-063"]()
         result = a.run("test task", action="coordinate")
-        assert result.agent_id == "SAM-AG-013"
+        assert result.agent_id == "SAM-AG-063"
         assert result.status in ("completed", "failed")
 
     def test_sneha_run(self):
@@ -467,10 +467,10 @@ class TestPhase3MessageBus:
 
     def test_samanvay_publishes(self, monkeypatch):
         published = self._patch_bus_and_llm(monkeypatch)
-        a = _REGISTRY["SAM-AG-013"]()
+        a = _REGISTRY["SAM-AG-063"]()
         a.run("test", action="coordinate")
         assert len(published) == 1
-        assert published[0].source_agent == "SAM-AG-013"
+        assert published[0].source_agent == "SAM-AG-063"
 
     def test_sneha_publishes(self, monkeypatch):
         published = self._patch_bus_and_llm(monkeypatch)

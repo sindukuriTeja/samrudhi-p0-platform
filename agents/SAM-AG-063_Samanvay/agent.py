@@ -18,7 +18,7 @@ from backend.core.message_bus import BusEnvelope, bus
 class Samanvay(BaseAgent):
     """Operations Coordination Agent."""
 
-    canonical_id = "SAM-AG-013"
+    canonical_id = "SAM-AG-063"
     name = "Samanvay"
     designation = "Operations Coordination Agent"
     agent_type = "thinking"
@@ -93,7 +93,7 @@ HARD RULES — NEVER VIOLATE
                 status="failed",
             )
         try:
-            bus.publish(BusEnvelope(
+            bus.publish_sync(BusEnvelope(
                 event_type="ops.coordinate",
                 source_agent=self.canonical_id,
                 target_agent="all",

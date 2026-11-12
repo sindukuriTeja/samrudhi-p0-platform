@@ -1,0 +1,131 @@
+# Samrudhi Agentic OS — P0 Platform
+# Full stack: FastAPI backend + Celery worker + PostgreSQL + Redis
+# Ollama runs locally on the host (not in Docker) — agents call localhost:11434
+
+services:
+  # --- PostgreSQL (production DB) ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: samrudhi-postgres
+    environment:
+      POSTGRES_DB: samrudhi
+      POSTGRES_USER: samrudhi_app
+      POSTGRES_PASSWORD: samrudhi_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U samrudhi_app -d samrudhi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- Redis (Celery broker + message bus live delivery) ---
+  redis:
+    image: redis:7-alpine
+    container_name: samrudhi-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # --- FastAPI Backend (Human Control Room) ---
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: samrudhi-backend
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+      SECRET_KEY: samrudhi-dev-secret-change-in-prod
+      ACCESS_TOKEN_EXPIRE_MINUTES: 60
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: qwen2.5:7b
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: samrudhi
+      POSTGRES_USER: samrudhi_app
+      POSTGRES_PASSWORD: samrudhi_secret
+      DATABASE_URL: postgresql+asyncpg://samrudhi_app:samrudhi_secret@postgres:5432/samrudhi
+      REDIS_URL: redis://redis:6379/0
+      DEFAULT_TENANT_ID: DEMO-HEALTHCARE-01
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # --- Celery Worker (Agent task execution) ---
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: samrudhi-worker
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      APP_ENV: development
+      SECRET_KEY: samrudhi-dev-secret-change-in-prod
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: qwen2.5:7b
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: samrudhi
+      POSTGRES_USER: samrudhi_app
+      POSTGRES_PASSWORD: samrudhi_secret
+      DATABASE_URL: postgresql+asyncpg://samrudhi_app:samrudhi_secret@postgres:5432/samrudhi
+      REDIS_URL: redis://redis:6379/0
+      DEFAULT_TENANT_ID: DEMO-HEALTHCARE-01
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # --- Test Runner (run pytest in Docker) ---
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: samrudhi-test
+    command: python3 -m pytest tests/ -v
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:///./tests/test_samrudhi.db
+      REDIS_URL: redis://redis:6379/1
+      SECRET_KEY: test-secret
+      OLLAMA_URL: http://host.docker.internal:11434
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Don't restart — run once and exit
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:

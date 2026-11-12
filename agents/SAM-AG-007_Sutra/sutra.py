@@ -81,7 +81,7 @@ manage connectors/integrations, monitor health, and enforce security policy."""
 
         # Publish platform event to bus
         try:
-            bus.publish(BusEnvelope(
+            bus.publish_sync(BusEnvelope(
                 event_type="tec.action",
                 source_agent=self.canonical_id,
                 target_agent="all",
