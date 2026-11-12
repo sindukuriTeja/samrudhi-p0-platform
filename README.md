@@ -185,6 +185,42 @@ API: `GET/PUT /api/knowledge/clients/{id}`, `POST /api/knowledge/clients/{id}/ap
 `POST /api/knowledge/sources/{id}/approve|retire`, `GET /api/knowledge/search?q=`.
 Migration `0003_knowledge.py` adds the two tables.
 
+Telemetry, cost and certification:
+- Telemetry (`execution_log`): the real start and end time, latency, prompt and response tokens
+  and model seconds of every agent run (collected from the model client while the agent runs),
+  and the true status: a "model unavailable" or failed run is logged as failed.
+- Cost and KPIs in code (`backend/projects/metrics.py`, `config/costing.yaml`): each project is
+  measured from its own records (tokens, model time, rework rounds, checks passed first time,
+  gate waits, packages published by Samay's due dates, facts verified, accepted deliverables).
+  Lagaat's `cost_report` turns that into cost per accepted deliverable using the configured
+  rates; an unset rate is reported as unavailable, never guessed. Lakshya's `evaluate_kpis`
+  compares each KPI with its target. History shows both per project.
+- Certification (Assurance page, `#/assurance`): the activation gate no longer accepts "a run()
+  method exists". It needs (1) the agent's code competency tests passing now — identity,
+  governance limits, escalation, tools, and the expected decisions of its code tools (e.g.
+  Swasthya blocks a cure claim, Vitaran refuses an over-capacity assignment, Prakash refuses
+  unapproved content) — and (2) a valid certification by a signed-in assurance lead, based on
+  that evidence plus a model test for thinking agents (each answers its real step instructions
+  and must return the structured result). Certifications are tied to the agent's code
+  fingerprint, expire after 90 days and can be revoked. Competency tests never send real bus
+  events.
+
+API: `GET /api/assurance/agents`, `POST /api/assurance/code-tests`, `POST /api/assurance/model-tests`,
+`POST /api/assurance/agents/{id}/certify|revoke`, `GET /api/assurance/projects/{id}/metrics`.
+Migration `0004_competency_runs.py` adds the evidence table and `approval_signoffs`.
+
+Gate 2 sign-off and tenant isolation:
+- Gate 2 needs two parties, enforced in code: a qualified reviewer (assurance lead or founder)
+  AND an authorised contact of the project's own client (role `client_approver`; demo account
+  `client_demo` for DEMO-HEALTHCARE-01). One person cannot sign for both; either party can reject
+  or ask for changes on their own. Nothing is published until both have approved, and Prakash's
+  release guard checks the final decision. Client contacts can do nothing else (no project
+  starts, stops, messages or Gate 1).
+- Tenant isolation (`backend/core/tenancy.py`): before any agent step runs, the data handed to it
+  is checked for another client's id or name; if found, the step is not run and the project
+  stops for a person. The human team's own instructions are not scanned; Gopniya checks the
+  output again.
+
 New tables (Alembic migration `migrations/versions/0001_project_tables.py`):
 `projects`, `project_messages`, `project_steps`, `approval_decisions`;
 migration `0002_step_result_json.py` adds `project_steps.result_json`.

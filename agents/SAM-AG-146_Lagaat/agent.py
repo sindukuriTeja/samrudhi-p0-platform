@@ -140,6 +140,21 @@ HARD RULES — NEVER VIOLATE
             "computed_at": _now(),
         }
 
+    @authority_guard("fin.summarise_run_cost")
+    def cost_report(self, metrics: dict, rates: dict = None, currency: str = None) -> dict:
+        """Cost per accepted deliverable from the project's measured usage (config/costing.yaml rates).
+
+        Money is computed only from configured rates; an unknown rate makes that part
+        "unavailable" instead of a guess. Tokens and model minutes per accepted deliverable are
+        always reported because they are measured.
+        """
+        from backend.core import costing
+        out = costing.cost(metrics or {}, rates, currency)
+        out.update({"tokens": (metrics or {}).get("tokens"), "model_runs": (metrics or {}).get("model_runs"),
+                    "model_seconds": (metrics or {}).get("model_seconds"),
+                    "human_decisions": (metrics or {}).get("human_decisions"), "computed_at": _now()})
+        return out
+
     @authority_guard("fin.compute_cost_per_deliverable")
     def compute_cost_per_deliverable(self, total_cost: float, accepted_deliverables: int) -> dict:
         """Cost per accepted deliverable."""

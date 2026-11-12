@@ -167,6 +167,16 @@ async def run_until_blocked(pid):
     return await Q.project_state(pid)
 
 
+async def sign_gate2(pid, request_id, note=None):
+    """Gate 2 needs a qualified reviewer AND the client's own authorised contact."""
+    async with async_session_maker() as s:
+        client = (await s.get(Project, pid)).client_id
+    first = await R.decide(pid, request_id, "approve", note, "reviewer", role="assurance_lead")
+    assert first["waiting_for"]
+    return await R.decide(pid, request_id, "approve", note, "client_contact", role="client_approver",
+                          user_client=client)
+
+
 def steps_of(st, key):
     return [x for x in st["steps"] if x["step_key"] == key]
 
@@ -226,7 +236,7 @@ async def test_full_chain_with_both_gates(monkeypatch, no_kick):
     assert steps_of(st, "assignments")[0]["result"]["status"] == "assigned"
     assert steps_of(st, "capacity")[0]["result"]["status"] == "capacity_ok"
 
-    await R.decide(pid, gate1["request_id"], "approve_with_changes", "Make the tone warmer.", "tester")
+    await R.decide(pid, gate1["request_id"], "approve_with_changes", "Make the tone warmer.", "tester", role="founder")
     st = await Q.project_state(pid)
     assert [x["round"] for x in steps_of(st, "direction")] == [1, 2]
     assert [x["round"] for x in steps_of(st, "distribution")] == [1, 2]
@@ -240,14 +250,14 @@ async def test_full_chain_with_both_gates(monkeypatch, no_kick):
 
     gate1b = st["pending_approval"]
     assert gate1b["agent_id"] == "SAM-AG-079"
-    await R.decide(pid, gate1b["request_id"], "approve", None, "tester")
+    await R.decide(pid, gate1b["request_id"], "approve", None, "tester", role="founder")
     st = await run_until_blocked(pid)
 
     gate2 = st["pending_approval"]
     assert gate2 and gate2["agent_id"] == "SAM-AG-052"                                # Sweekriti, Gate 2
     assert steps_of(st, "pramaan")[0]["result"]["accepted"] is True
     assert steps_of(st, "swasthya")[0]["result"]["status"] == "pass"
-    await R.decide(pid, gate2["request_id"], "approve", None, "tester")
+    await sign_gate2(pid, gate2["request_id"])
     st = await run_until_blocked(pid)
 
     assert st["project"]["status"] == "completed"
@@ -256,6 +266,10 @@ async def test_full_chain_with_both_gates(monkeypatch, no_kick):
     assert all(x["summary"] for x in st["steps"] if x["status"] == "skipped")       # every skip has a reason
     cost = steps_of(st, "costing")[0]["result"]
     assert cost["accepted_deliverables"] == 4 and cost["total_cost"] == "unavailable"
+    assert "machine time (no rate)" in cost["unavailable_parts"] and cost["parts"]["model_tokens"] == 0.0
+    kpis = {k["kpi"]: k for k in steps_of(st, "kpi_status")[0]["result"]["kpis"]}
+    assert kpis["on_time_rate"]["value"] == 1.0 and kpis["on_time_rate"]["met"] is True    # published by the due dates
+    assert kpis["rework_rounds"]["value"] == 0 and kpis["first_pass_rate"]["value"] == 1.0
     assert steps_of(st, "final_brief")[0]["status"] == "completed"
     summary = await Q.summary(pid)
     assert {d["name"] for d in summary["deliverables"]} >= {"Copy", "Design brief", "Client report"}
@@ -268,7 +282,7 @@ async def test_claim_check_sends_work_back_and_stops_at_round_limit(monkeypatch,
     stub(monkeypatch, writer_text="This tea is a guaranteed cure for diabetes.", seen=seen)
     await R.start_project(pid, None, "tester")
     st = await run_until_blocked(pid)
-    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")   # Gate 1
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester", role="founder")   # Gate 1
     st = await run_until_blocked(pid)
 
     rework = steps_of(st, "rework")
@@ -292,7 +306,7 @@ async def test_shuddhi_send_back_then_pass(monkeypatch, no_kick):
     stub(monkeypatch, verdicts={"SAM-AG-080": ["send_back: caption 2 claims too much"]})
     await R.start_project(pid, None, "tester")
     st = await run_until_blocked(pid)
-    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester", role="founder")
     st = await run_until_blocked(pid)
     shuddhi = steps_of(st, "shuddhi")
     assert [x["passed"] for x in shuddhi] == [False, True]
@@ -307,12 +321,12 @@ async def test_reject_at_gate2_then_retry_reruns_the_checks(monkeypatch, no_kick
     stub(monkeypatch)
     await R.start_project(pid, None, "tester")
     st = await run_until_blocked(pid)
-    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester", role="founder")
     st = await run_until_blocked(pid)
     gate2 = st["pending_approval"]
-    await R.decide(pid, gate2["request_id"], "reject", "Too salesy.", "tester")
+    await R.decide(pid, gate2["request_id"], "reject", "Too salesy.", "tester", role="assurance_lead")
     with pytest.raises(R.ProjectError) as again:
-        await R.decide(pid, gate2["request_id"], "approve", None, "tester")
+        await R.decide(pid, gate2["request_id"], "approve", None, "tester2", role="founder")
     assert again.value.status == 409
     st = await Q.project_state(pid)
     assert st["project"]["status"] == "needs_attention"
@@ -344,12 +358,20 @@ async def test_model_unavailable_is_reported_not_invented(monkeypatch, no_kick):
 
 
 async def test_activate_needed_uses_the_gate(no_kick):
+    """The gate activates only certified agents; the others stay inactive with the reason."""
+    from backend.core import certification as C
+    from backend.projects import certification as T
     await _ensure_agents("proposed")
+    lead = {"username": "satya_human", "role": "assurance_lead"}
+    for cid in ("SAM-AG-161", "SAM-AG-064"):                 # code-step agents: code evidence is enough
+        assert (await T.run_code(cid, "satya_human"))["passed"]
+        async with async_session_maker() as s:
+            await C.certify(s, cid, lead)
     result = await R.activate_needed("tester")
-    assert result["activated"] >= 1
+    assert {r["canonical_id"] for r in result["results"] if r["activated"]} == {"SAM-AG-161", "SAM-AG-064"}
     ready = await R.readiness()
-    # every agent that passed the gate is now Active; any that failed is listed with a reason
     assert {f["canonical_id"] for f in result["failed"]} == {a["canonical_id"] for a in ready["not_active"]}
+    assert all("no valid certification" in f["reason"] for f in result["failed"])
     await _ensure_agents("active")
 
 
@@ -395,10 +417,10 @@ async def test_completed_project_is_saved_to_the_registers(monkeypatch, no_kick)
     stub(monkeypatch)
     await R.start_project(pid, "Create 3 posts for World Diabetes Day.", "tester")
     st = await run_until_blocked(pid)
-    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester", role="founder")
     st = await run_until_blocked(pid)
     gate2 = st["pending_approval"]
-    await R.decide(pid, gate2["request_id"], "approve", None, "tester")
+    await sign_gate2(pid, gate2["request_id"])
     st = await run_until_blocked(pid)
     assert st["project"]["status"] == "completed"
 
@@ -467,7 +489,7 @@ async def test_producers_get_exactly_the_planned_packages(monkeypatch, no_kick):
     stub(monkeypatch, seen=seen)
     await R.start_project(pid, "Make 4 posts for World Diabetes Day.", "tester")
     st = await run_until_blocked(pid)
-    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester", role="founder")
     st = await run_until_blocked(pid)                                        # Gate 2
 
     planned = {p["package_id"]: p["due_date"] for p in steps_of(st, "schedule")[0]["result"]["packages"]}
@@ -490,7 +512,7 @@ async def test_producer_without_packages_is_skipped_and_not_reworked(monkeypatch
     stub(monkeypatch, verdicts={"SAM-AG-080": ["send_back: caption 1 needs a source"]})
     await R.start_project(pid, None, "tester")
     st = await run_until_blocked(pid)
-    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester", role="founder")
     st = await run_until_blocked(pid)
     art = steps_of(st, "artwork")
     assert len(art) == 1 and art[0]["status"] == "skipped" and "no work packages" in art[0]["summary"]
@@ -544,7 +566,7 @@ def _writer(seen, first, later):
 
 async def _to_gate2(pid):
     st = await run_until_blocked(pid)
-    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")   # Gate 1
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester", role="founder")   # Gate 1
     return await run_until_blocked(pid)
 
 
@@ -564,7 +586,7 @@ async def test_client_disclaimer_is_given_to_the_writer_and_enforced(monkeypatch
     assert sw[1]["result"]["status"] == "pass" and sw[1]["round"] == 2
     assert st["pending_approval"]["agent_id"] == "SAM-AG-052"                 # Gate 2 after the fix
 
-    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")   # Gate 2
+    await sign_gate2(pid, st["pending_approval"]["request_id"])                            # Gate 2
     st = await run_until_blocked(pid)
     pub = steps_of(st, "publishing")[-1]["result"]
     assert pub["status"] == "scheduled"
@@ -608,7 +630,7 @@ async def test_publishing_refuses_content_that_fails_the_final_check(monkeypatch
     # A rule added after Gate 2 (e.g. the client bans a phrase): the release guard checks again.
     real = SR.rules_for
     monkeypatch.setattr(SR, "rules_for", lambda cid: {**real(cid), "forbidden_claims": ["walk daily"]})
-    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    await sign_gate2(pid, st["pending_approval"]["request_id"])
     st = await run_until_blocked(pid)
     pub = steps_of(st, "publishing")[-1]
     assert pub["status"] == "needs_attention" and pub["result"]["status"] == "refused"
@@ -714,3 +736,143 @@ async def test_research_is_checked_against_the_approved_library(monkeypatch, no_
     assert 'post 1: figure "1 in 5" is not in the research pack' in shuddhi[0]["result"]["code_check"]["findings"]
     assert shuddhi[1]["result"]["code_check"]["passed"] is True
     assert st["pending_approval"]["agent_id"] == "SAM-AG-052"
+
+
+# ---------------------------------------------------------------------------
+# Gate 2: a qualified reviewer AND the client sign off; tenant isolation
+# ---------------------------------------------------------------------------
+
+async def test_gate2_needs_the_reviewer_and_the_clients_own_contact(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project(client_id="DEMO-HEALTHCARE-01")
+    stub(monkeypatch, writer_text="Walk daily. Consult your doctor for advice about your health.")
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    with pytest.raises(R.ProjectError) as e:                       # a client contact cannot decide Gate 1
+        await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "client_demo",
+                       role="client_approver", user_client="DEMO-HEALTHCARE-01")
+    assert e.value.status == 403
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "vikram", role="founder")
+    st = await run_until_blocked(pid)
+    req = st["pending_approval"]["request_id"]
+    assert [x["party"] for x in st["pending_approval"]["signoff"]] == ["reviewer", "client"]
+
+    for kwargs, status in [({"role": None}, 403), ({"role": "client_experience_lead"}, 403),
+                           ({"role": "client_approver", "user_client": "DEMO-CLINIC-02"}, 403)]:
+        with pytest.raises(R.ProjectError) as e:
+            await R.decide(pid, req, "approve", None, "someone", **kwargs)
+        assert e.value.status == status
+    r = await R.decide(pid, req, "approve", None, "vikram", role="founder")
+    assert r["waiting_for"] == ["the client's authorised contact"]
+    st = await run_until_blocked(pid)
+    assert st["pending_approval"]["request_id"] == req                # still waiting: nothing published
+    assert steps_of(st, "publishing")[0]["status"] == "queued"
+    assert st["pending_approval"]["signoff"][0]["signed_by"] == "vikram"
+    with pytest.raises(R.ProjectError) as e:                       # the reviewer cannot sign twice
+        await R.decide(pid, req, "approve", None, "satya_human", role="assurance_lead")
+    assert e.value.status == 409
+    with pytest.raises(R.ProjectError) as e:                       # one person, two parties
+        await R.decide(pid, req, "approve", None, "vikram", role="client_approver", user_client="DEMO-HEALTHCARE-01")
+    assert "two parties" in str(e.value.detail)
+    await R.decide(pid, req, "approve", None, "client_demo", role="client_approver", user_client="DEMO-HEALTHCARE-01")
+    st = await run_until_blocked(pid)
+    assert st["project"]["status"] == "completed"
+    pub = steps_of(st, "publishing")[0]["result"]
+    assert pub["status"] == "scheduled"
+
+
+async def test_client_can_send_gate2_back_alone(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch)
+    await R.start_project(pid, None, "tester")
+    st = await _to_gate2(pid)
+    req = st["pending_approval"]["request_id"]
+    await R.decide(pid, req, "approve_with_changes", "Use our clinic's timings.", "client_contact",
+                   role="client_approver", user_client="TEST")
+    st = await Q.project_state(pid)
+    assert [x["round"] for x in steps_of(st, "writing")][-1] == 2           # rework round from the client's note
+
+
+async def test_tenant_isolation_stops_a_step_with_another_clients_data(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project(client_id="DEMO-HEALTHCARE-01")
+    # Shruti's brief (a model step) wrongly carries another client's name into the hand-over
+    stub(monkeypatch, answers={"SAM-AG-050": {"objective": "Copy the Sunrise Diabetes Clinic campaign",
+                                               "audience": "adults", "deliverables": ["posts"],
+                                               "deadline": "soon", "limits": []}})
+    await R.start_project(pid, "Posts about early signs. Unlike Sunrise Clinic, keep it calm.", "tester")
+    st = await run_until_blocked(pid)
+    blocked = next(x for x in st["steps"] if x["status"] == "needs_attention")
+    assert "Tenant isolation" in blocked["error"] and "Sunrise Diabetes Clinic" in blocked["error"]
+    assert blocked["step_key"] == "workflow"                               # the next agent never received it
+    assert st["project"]["status"] == "needs_attention"
+
+
+
+async def test_gate1_is_decided_by_the_account_owner_only(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch)
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    req = st["pending_approval"]["request_id"]
+    with pytest.raises(R.ProjectError) as e:
+        await R.decide(pid, req, "approve", None, "satya_human", role="assurance_lead")
+    assert e.value.status == 403 and "account owner" in str(e.value.detail)
+    r = await R.decide(pid, req, "approve", None, "divya", role="client_experience_lead")
+    assert "waiting_for" not in r                                   # one party: decided at once
+    st = await run_until_blocked(pid)
+    assert st["pending_approval"]["agent_id"] == "SAM-AG-052"       # on to Gate 2
+
+
+
+# ---------------------------------------------------------------------------
+# a model reviewer cannot contradict a rule the code verifies (live bug, PRJ-D8076B8B)
+# ---------------------------------------------------------------------------
+
+DISC = "Consult your doctor for advice about your health."
+
+
+async def test_false_disclaimer_send_back_is_overruled_by_the_code(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project(client_id="DEMO-HEALTHCARE-01")
+    seen = {}
+    stub(monkeypatch, seen=seen, writer_text=f"Walk daily. {DISC}",
+         verdicts={"SAM-AG-080": ["send_back: All posts are missing the required disclaimer at the end of the caption."]})
+    await R.start_project(pid, None, "tester")
+    st = await _to_gate2(pid)
+    task, ctx = seen["SAM-AG-080"][0]
+    assert "the required disclaimer is present in all 3 posts" in task and ctx["code_checked"]
+    sh = steps_of(st, "shuddhi")
+    assert len(sh) == 1 and sh[0]["passed"] is True                       # no pointless rework round
+    assert sh[0]["result"]["overruled"][0].startswith("All posts are missing the required disclaimer")
+    assert sh[0]["result"]["model_verdict"].startswith("send_back (overruled")
+    assert not steps_of(st, "rework")
+    assert st["pending_approval"]["agent_id"] == "SAM-AG-052"
+
+
+async def test_true_disclaimer_send_back_stands(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project(client_id="DEMO-HEALTHCARE-01")
+    seen = {}
+    stub(monkeypatch, seen=seen, writer_text=_writer(seen, "Walk daily.", f"Walk daily. {DISC}"),
+         verdicts={"SAM-AG-080": ["send_back: The disclaimer is missing."]})
+    await R.start_project(pid, None, "tester")
+    st = await _to_gate2(pid)
+    sh = steps_of(st, "shuddhi")
+    assert sh[0]["passed"] is False and "overruled" not in sh[0]["result"]          # the code agrees: it stands
+    assert [x["round"] for x in steps_of(st, "writing")] == [1, 2]
+
+
+async def test_only_the_contradicted_part_of_a_send_back_is_dropped(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project(client_id="DEMO-HEALTHCARE-01")
+    stub(monkeypatch, writer_text=f"Walk daily. {DISC}",
+         verdicts={"SAM-AG-080": ["send_back: The disclaimer is missing. The tone of post 2 is too alarming."]})
+    await R.start_project(pid, None, "tester")
+    st = await _to_gate2(pid)
+    first = steps_of(st, "shuddhi")[0]["result"]
+    assert first["reasons"] == ["The tone of post 2 is too alarming."]               # judgement stays with the model
+    assert first["overruled"] == ["The disclaimer is missing. (the code verified this rule is met)"]
+    assert steps_of(st, "shuddhi")[0]["passed"] is False

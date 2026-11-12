@@ -26,9 +26,10 @@ from backend.core.authority import AuthorityError, check_authority
 from backend.core.message_bus import BusEnvelope, bus
 from backend.database import async_session_maker
 from backend.models import Agent, Approval, ExecutionLog
-from backend.models.projects import ApprovalDecision, Project, ProjectMessage, ProjectStep
+from backend.models.projects import ApprovalDecision, ApprovalSignoff, Project, ProjectMessage, ProjectStep
 from backend.core import safety_rules
 from backend.core import knowledge as kn
+from backend.core import tenancy
 from backend.models.knowledge import ClientProfile, KnowledgeSource
 from backend.projects import dispatch as dispatcher
 from backend.projects import registers
@@ -202,8 +203,11 @@ async def _gate_decision(s, pid: str, key: str) -> dict:
         ApprovalDecision.request_id == st.approval_id))).scalars().first()
     if dec is None:
         return {"request_id": st.approval_id, "decision": None, "decided_by": None}
+    signs = (await s.execute(select(ApprovalSignoff).where(ApprovalSignoff.request_id == st.approval_id)
+                             .order_by(ApprovalSignoff.decided_at))).scalars().all()
     return {"request_id": st.approval_id, "decision": dec.decision, "decided_by": dec.decided_by,
-            "decided_at": dec.decided_at.isoformat() if dec.decided_at else None}
+            "decided_at": dec.decided_at.isoformat() if dec.decided_at else None,
+            "signed_by": [{"party": r.party, "by": r.decided_by, "decision": r.decision} for r in signs]}
 
 
 def profile_out(cp: ClientProfile) -> dict:
@@ -236,6 +240,17 @@ async def _library_query(s, p: Project) -> str:
         if st is not None:
             parts.append(schema.flatten_text(schema.public(st.result_json)))
     return " ".join(parts)
+
+
+async def _foreign_data(s, p: Project, data) -> list[str]:
+    """Other clients' ids or names found in data about to be handed to an agent (tenant isolation)."""
+    clients: dict[str, list[str]] = {}
+    for cid, info in (safety_rules._load().get("clients") or {}).items():
+        clients.setdefault(cid, []).extend([(info or {}).get("name")] + list((info or {}).get("aliases") or []))
+    for cid, name in (await s.execute(select(ClientProfile.client_id, ClientProfile.name))).all():
+        clients.setdefault(cid, []).append(name)
+    marks = tenancy.markers(p.client_id, [(c, [n for n in ns if n]) for c, ns in clients.items()])
+    return tenancy.find_foreign(data, marks)
 
 
 async def _safety_findings(s, p: Project, posts_from: str = "writing", evidence_from: str | None = "research",
@@ -293,6 +308,14 @@ async def _resolve(value, s, p: Project, step: ProjectStep, flow: dict):
         if name.startswith("data:"):
             return data
         return schema.flatten_text(data) if data else await _output(s, p.id, key)
+    if name == "metrics":
+        from backend.projects.metrics import project_metrics
+        return await project_metrics(s, p.id)
+    if name in ("cost_rates", "currency", "kpi_targets"):
+        from backend.core import costing
+        cfg = costing.config()
+        return {"cost_rates": cfg.get("rates") or {}, "currency": cfg.get("currency"),
+                "kpi_targets": cfg.get("kpis") or {}}[name]
     if name == "client_profile":
         return await _client_profile(s, p.client_id)
     if name == "client_rules":
@@ -484,6 +507,11 @@ class ProjectRunner:
                 return await self._run_tool(s, p, step, d, flow)
 
             task_text, context = await self._build_task(s, p, step, d)
+            foreign = await _foreign_data(s, p, context)
+            if foreign:
+                return await self._block(s, p, step, (
+                    "Tenant isolation: the data for this step contains another client's information ("
+                    + ", ".join(foreign) + "), so it was not run. Remove it, then press Retry."))
             await s.commit()
             step_id = step.id
             args = [step.agent_id, task_text, p.client_id, p.id]
@@ -568,7 +596,16 @@ class ProjectRunner:
             else:
                 parts.insert(1, "No approved source in the library matches this project, so every fact will be "
                                 "marked not verified. Write source_id \"none\" and quote \"unavailable\".")
-        if d.get("safety_rules"):
+        if d.get("code_rules"):
+            # Tell the reviewer what the code has already verified, so it does not repeat (or
+            # contradict) a check the code makes exactly.
+            cr = d["code_rules"]
+            found, n = await _safety_findings(s, p, cr.get("posts_from", "writing"), cr.get("evidence_from"))
+            summary = safety_rules.code_summary(found, n, safety_rules.rules_for(p.client_id))
+            if summary:
+                context["code_checked"] = summary
+                parts.insert(1, summary)
+        if d.get("safety_rules") and not d.get("code_rules"):
             rules_text = safety_rules.prompt_text(safety_rules.rules_for(p.client_id))
             if rules_text:
                 context["safety_rules"] = rules_text
@@ -598,6 +635,11 @@ class ProjectRunner:
     async def _run_tool(self, s, p: Project, step: ProjectStep, d: dict, flow: dict) -> bool:
         from agents.base import get_agent_module
         args = await _resolve(d.get("args") or {}, s, p, step, flow)
+        foreign = await _foreign_data(s, p, args)
+        if foreign:
+            return await self._block(s, p, step, (
+                "Tenant isolation: the data for this step contains another client's information ("
+                + ", ".join(foreign) + "), so it was not run. Remove it, then press Retry."))
         started = utcnow()
         try:
             result = getattr(get_agent_module(step.agent_id), d["method"])(**args)
@@ -725,6 +767,21 @@ class ProjectRunner:
         out = dict(structured or {})
         out["code_check"] = {"passed": not findings, "posts_checked": n,
                              "findings": [safety_rules.describe(f) for f in findings]}
+        if not findings and not passed:
+            # The model sent the work back. A reason about a rule the code checks exactly (the
+            # disclaimer, empty fields, other clients) stands only if the code agrees.
+            everything, _ = await _safety_findings(s, p, cr.get("posts_from", "writing"), cr.get("evidence_from"))
+            kept, dropped = safety_rules.overrule(out.get("reasons"), everything, n)
+            if dropped:
+                issues = [i for i in (out.get("issues") or []) if not (isinstance(i, dict) and safety_rules.overrule(
+                    i.get("problem"), everything, n)[1])]
+                out["overruled"] = [f"{r} (the code verified this rule is met)" for r in dropped]
+                out["issues"] = issues
+                if not kept:
+                    out["model_verdict"] = "send_back (overruled: the code verified every rule it named)"
+                    out["verdict"], out["reasons"] = "pass", "The reviewer's only reasons were contradicted by the code check."
+                    return out, True
+                out["reasons"] = kept
         if not findings:
             return out, passed
         reasons = ["Code rule: " + safety_rules.describe(f) for f in findings]
@@ -1097,7 +1154,18 @@ async def retry_step(pid: str, step_id: int, user: str) -> None:
 DECISIONS = ("approve", "reject", "approve_with_changes")
 
 
-async def decide(pid: str, request_id: str, decision: str, note: str | None, user: str) -> dict:
+CLIENT_ROLES = ("client_approver",)
+
+
+async def decide(pid: str, request_id: str, decision: str, note: str | None, user: str,
+                 role: str | None = None, user_client: str | None = None) -> dict:
+    """Record a human decision on a gate.
+
+    A gate with `signoff` parties (Gate 2) needs each party to approve: a qualified reviewer AND
+    an authorised contact of the project's own client. One person cannot sign for two parties.
+    A rejection or "approve with changes" from any party decides at once. Gates without
+    sign-off parties are decided by the internal team (never by a client contact).
+    """
     if decision not in DECISIONS:
         raise ProjectError(400, f"Decision must be one of {', '.join(DECISIONS)}.")
     note = (note or "").strip() or None
@@ -1111,6 +1179,43 @@ async def decide(pid: str, request_id: str, decision: str, note: str | None, use
         if st is None:
             raise ProjectError(404, "Approval request not found for this project.")
         now = utcnow()
+        gate = (step_def(get_flow(p.flow_key), st.step_key) or {}).get("approval") or {}
+        parties = gate.get("signoff") or []
+        party = None
+        if parties:
+            party = next((x for x in parties if role in (x.get("roles") or [])), None)
+            if party is None:
+                raise ProjectError(403, "This gate needs " + " and ".join(x["label"] for x in parties) +
+                                   f" to sign off; your role ({role or 'unknown'}) cannot sign it.")
+            if party.get("client") and user_client != p.client_id:
+                raise ProjectError(403, "You can only sign off content for your own client.")
+            appr = (await s.execute(select(Approval).where(Approval.request_id == request_id))).scalars().first()
+            if appr is not None and appr.decision is not None:
+                raise ProjectError(409, {"message": "This request was already decided.",
+                                         "decision": appr.decision, "decided_by": appr.decided_by})
+            prior = (await s.execute(select(ApprovalSignoff).where(
+                ApprovalSignoff.request_id == request_id))).scalars().all()
+            for r in prior:
+                if r.party == party["party"]:
+                    raise ProjectError(409, f"{party['label']} has already signed ({r.decided_by}).")
+                if r.decided_by == user:
+                    raise ProjectError(409, "One person cannot sign for two parties.")
+            s.add(ApprovalSignoff(request_id=request_id, project_id=pid, party=party["party"], decision=decision,
+                                  note=note, decided_by=user, role=role, decided_at=now))
+            signed_by = [{"party": r.party, "by": r.decided_by} for r in prior] + [{"party": party["party"], "by": user}]
+            if decision == "approve":
+                signed = {r.party for r in prior} | {party["party"]}
+                missing = [x["label"] for x in parties if x["party"] not in signed]
+                if missing:
+                    s.add(ProjectMessage(project_id=pid, author_type="human", author=user, kind="decision",
+                                         step_id=st.id, text=f"{party['label']} approved" + (f": {note}" if note else ".")
+                                         + " Waiting for " + " and ".join(missing) + "."))
+                    await s.commit()
+                    await notify("project", pid)
+                    return {"request_id": request_id, "decision": "approve", "note": note, "decided_by": user,
+                            "party": party["party"], "waiting_for": missing}
+        elif role in CLIENT_ROLES:
+            raise ProjectError(403, "This decision belongs to the internal team.")
         # Record the decision exactly once (double clicks / two tabs are ignored).
         res = await s.execute(
             update(Approval)
@@ -1129,7 +1234,8 @@ async def decide(pid: str, request_id: str, decision: str, note: str | None, use
             })
         s.add(ApprovalDecision(request_id=request_id, project_id=pid, decision=decision, note=note,
                                decided_by=user, decided_at=now,
-                               details={"step_id": st.id, "agent_id": st.agent_id}))
+                               details={"step_id": st.id, "agent_id": st.agent_id,
+                                        **({"party": party["party"], "signed_by": signed_by} if party else {})}))
         label = {"approve": "approved", "reject": "rejected",
                  "approve_with_changes": "approved with changes"}[decision]
         s.add(ProjectMessage(project_id=pid, author_type="human", author=user, kind="decision",

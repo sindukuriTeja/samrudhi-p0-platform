@@ -60,6 +60,7 @@ const I = {
   x: svg('<path d="M18 6 6 18M6 6l12 12"/>', 16),
   pencil: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>', 16),
   retry: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>', 16),
+  shield: svg('<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6Z"/><path d="m9 12 2 2 4-4"/>'),
   book: svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/>'),
   ext: svg('<path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>', 14),
 };
@@ -229,6 +230,7 @@ function renderSidebar() {
       </div>
       ${navBtn('#/agents', I.users, 'Agents', v.name === 'agents', false)}
       ${navBtn('#/knowledge', I.book, 'Knowledge', v.name === 'knowledge', false)}
+      ${navBtn('#/assurance', I.shield, 'Assurance', v.name === 'assurance', false)}
     </nav>
     <div class="monitor-card">
       <p class="section-label">Monitoring</p>
@@ -280,6 +282,7 @@ function route() {
   else if (parts[0] === 'projects') S.view = { name: 'projects' }, viewProjects();
   else if (parts[0] === 'history') S.view = { name: 'history', id: parts[1] || null }, viewHistory(parts[1] || null);
   else if (parts[0] === 'agents') S.view = { name: 'agents' }, viewAgents();
+  else if (parts[0] === 'assurance') S.view = { name: 'assurance' }, viewAssurance();
   else if (parts[0] === 'knowledge') S.view = { name: 'knowledge', client: parts[1] || null }, viewKnowledge(parts[1] || null);
   else { location.replace('#/projects/new'); return; }
   renderSidebar();
@@ -501,6 +504,8 @@ async function viewProject(pid) {
           <div class="title">${SYM.needs_attention()} Your decision is needed <span class="asked">Asked by ${esc(a.agent_name)}</span></div>
           <div class="wrap">${esc(a.question || 'Can the team continue?')}</div>
           ${a.why ? `<div class="muted small wrap"><strong>Why you decide here:</strong> ${esc(a.why)}</div>` : ''}
+          ${a.signoff && a.signoff.length ? `<div class="small wrap"><strong>${a.signoff.length > 1 ? 'Needs both to approve:' : 'Who decides:'}</strong> ${a.signoff.map(x => x.signed_by
+            ? `${SYM.completed()} ${esc(x.label)} — ${esc(x.signed_by)}` : `${SYM.queued()} ${esc(x.label)} — waiting`).join(' · ')}</div>` : ''}
           <button class="toggle" data-fullreq="${esc(a.request_id)}" aria-expanded="${showFull}">${showFull ? I.chevDown : I.chev} Read the full request</button>
           ${showFull ? `<div class="full-req">${esc(m.text)}</div>` : ''}
           <div class="row">
@@ -604,8 +609,8 @@ async function viewProject(pid) {
     S.busy.add(req); $$(`[data-req="${CSS.escape(req)}"]`).forEach(b => b.disabled = true);
     try {
       const r = await act(() => api(`/api/projects/${encodeURIComponent(pid)}/approvals/${encodeURIComponent(req)}/decision`, { method: 'POST', json: { decision, note: note || null } }));
-      if (r) { delete S.ui.notes[req]; toast('Decision recorded'); }
-    } catch (e) { toast(e.status === 409 ? 'Already decided: ' + e.message : e.message); }
+      if (r) { delete S.ui.notes[req]; toast(r.waiting_for && r.waiting_for.length ? 'Your sign-off is recorded. Waiting for ' + r.waiting_for.join(' and ') + '.' : 'Decision recorded'); }
+    } catch (e) { toast(e.message); }
     S.busy.delete(req);
     await load(); loadWorkforce();
   }
@@ -649,7 +654,8 @@ async function viewHistory(selId) {
     if (!selId) return;
     const box = $('#hd');
     try {
-      const d = await api(`/api/projects/${encodeURIComponent(selId)}/summary`);
+      const [d, mx] = await Promise.all([api(`/api/projects/${encodeURIComponent(selId)}/summary`),
+        api(`/api/assurance/projects/${encodeURIComponent(selId)}/metrics`).catch(() => null)]);
       const p = d.project, t = d.tiles;
       const icon = it => it.type === 'human' || it.type === 'decision'
         ? (it.decision === 'reject' ? SYM.needs_attention('var(--red)') : `<span style="color:var(--sky)">${I.pencil}</span>`)
@@ -659,6 +665,7 @@ async function viewHistory(selId) {
           <div style="min-width:0"><h2 style="margin:0;font-size:20px" class="wrap">${esc(p.name)}</h2><div class="muted small">${esc(date(p.started_at || p.created_at))} · Client: ${esc(p.client_id)} · created by ${esc(p.created_by)}</div></div>
           <span class="status-chip st-${esc(p.status)}">${esc(PSTATUS[p.status] || p.status)}</span></div>
         <div class="tiles4">${tile(t.duration_s == null ? null : dur(t.duration_s), 'Duration', 'c-sky', true)}${tile(t.agents_used, 'Agents used', 'c-green', true)}${tile(t.human_approvals, 'Human decisions', 'c-amber', true)}${tile(t.deliverables, 'Deliverables', 'c-indigo', true)}</div>
+        ${mx ? metricsBlock(mx) : ''}
         <div><p class="section-label" style="margin-bottom:12px">What happened</p>
           <div class="timeline">${d.timeline.length ? d.timeline.map(it => `<div class="tl">${icon(it)}<div><div class="wrap">${esc(it.title)}</div>${it.detail ? `<div class="d">${it.type === 'human' || it.type === 'decision' ? '“' + esc(it.detail) + '”' : esc(it.detail)}</div>` : ''}</div><div class="when">${esc(time(it.at))}</div></div>`).join('') : '<p class="muted">Nothing was recorded for this project.</p>'}</div></div>
         <div><p class="section-label" style="margin-bottom:8px">Deliverables</p>
@@ -750,6 +757,109 @@ function viewAgents() {
 renderSidebar();
 loadWorkforce();
 wfLive.start();
+/* measured cost and KPIs (history detail) */
+const KPI_LABEL = { first_pass_rate: 'Checks passed first time', rework_rounds: 'Rework rounds', on_time_rate: 'Packages on time',
+  verified_fact_rate: 'Facts verified', model_failure_rate: 'Model failures', cycle_time_hours: 'Start to finish (hours)' };
+const pct = v => v == null ? 'unavailable' : Math.round(v * 100) + '%';
+const kval = (k, v) => v == null ? 'unavailable' : /rate$/.test(k) ? pct(v) : String(v);
+function metricsBlock(mx) {
+  const m = mx.metrics, c = mx.cost, k = mx.kpis;
+  const money = v => typeof v === 'number' ? `${esc(c.currency)} ${v.toFixed(2)}` : 'unavailable';
+  return `<div><p class="section-label" style="margin-bottom:12px">Measured cost and KPIs <span class="faint">(from the run log, in code)</span></p>
+    <div class="tiles4">${tile(m.tokens, 'Model tokens', 'c-sky', true)}${tile((m.model_seconds / 60).toFixed(1), 'Model minutes', 'c-indigo', true)}${tile(m.model_runs, 'Model runs', 'c-green', true)}${tile(m.accepted_deliverables, 'Accepted deliverables', 'c-amber', true)}</div>
+    <div class="small" style="margin-top:10px"><b>Cost per accepted deliverable:</b> ${money(c.cost_per_accepted_deliverable)} · <b>Tokens per deliverable:</b> ${esc(c.tokens_per_accepted_deliverable)} · <b>Model minutes per deliverable:</b> ${esc(c.model_minutes_per_accepted_deliverable)}</div>
+    ${c.note ? `<div class="muted small">${esc(c.note)}</div>` : ''}
+    <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>KPI</th><th>Measured</th><th>Target</th><th>Result</th></tr></thead><tbody>
+      ${k.kpis.map(r => `<tr><td>${esc(KPI_LABEL[r.kpi] || r.kpi)}</td><td>${esc(kval(r.kpi, r.value))}</td><td>${r.better === 'lower' ? '≤ ' : '≥ '}${esc(kval(r.kpi, r.target))}</td>
+        <td>${r.met === true ? '<span class="status-chip st-running">Met</span>' : r.met === false ? '<span class="status-chip st-needs_attention">Missed</span>' : '<span class="status-chip st-draft">Not measured</span>'}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+
+/* ======================================================================
+   Assurance — competency tests and certification (activation needs a valid certification)
+   ====================================================================== */
+async function viewAssurance() {
+  main(`<header class="page-head"><h1>Assurance</h1><p>Agents are activated only with a valid certification: code tests on their current code, a model test for thinking agents, and an assurance lead's sign-off. Changing an agent's code ends its certification.</p></header>
+    <div class="page" id="as">${stateView('loading')}</div>`);
+  let scope = 'flow', data = null, open = null, detail = null, poll = null;
+  const box = () => $('#as');
+  async function load() {
+    try { data = await api('/api/assurance/agents?scope=' + scope); render(); }
+    catch (e) { box().innerHTML = stateView('error', 'Could not load assurance data', esc(e.message), true); box().querySelector('[data-retry]').onclick = load; }
+    clearTimeout(poll); if (data && data.job && data.job.running) poll = setTimeout(load, 8000);
+  }
+  S.cleanup = () => clearTimeout(poll);
+  const testCell = (t, need) => !need ? '<span class="faint small">not needed</span>'
+    : !t ? '<span class="status-chip st-draft">Not tested</span>'
+    : `<span class="status-chip ${t.passed ? 'st-running' : 'st-needs_attention'}">${t.passed ? 'Passed' : 'Failed'}</span><div class="faint small">${esc(date(t.ended_at || t.started_at))}${t.kind === 'model' && t.tokens ? ' · ' + esc(t.tokens) + ' tokens' : ''}</div>`;
+  function render() {
+    const b = box(); if (!b) return;
+    const role = S.auth && S.auth.role, canTest = ['assurance_lead', 'founder'].includes(role), canCert = role === 'assurance_lead';
+    const j = data.job, sm = data.summary;
+    b.innerHTML = `
+      <div class="tiles4">${tile(sm.agents, scope === 'flow' ? 'Agents in the project chain' : 'Agents', 'c-sky', true)}${tile(sm.certified, 'Certified', 'c-green', true)}${tile(sm.ready_to_certify, 'Ready to certify', 'c-amber', true)}${tile(sm.agents - sm.certified, 'Not certified', 'c-grey', true)}</div>
+      <div class="filters">
+        <button class="chip${scope === 'flow' ? ' on' : ''}" data-scope="flow">Project chain</button><button class="chip${scope === 'all' ? ' on' : ''}" data-scope="all">All agents</button>
+        <span style="margin-left:auto" class="row">
+          <button class="btn btn-sm" id="as-code" ${canTest ? '' : 'disabled title="Sign in as a founder or assurance lead"'}>Run code tests</button>
+          <button class="btn btn-sm" id="as-model" ${canTest && !j.running ? '' : 'disabled'} title="Each thinking agent answers its real step instructions; takes 1–2 minutes per agent">${j.running ? 'Model tests running…' : 'Run model tests'}</button>
+        </span>
+      </div>
+      ${j.running || (j.done && j.done.length) ? `<div class="banner" role="status">${j.running ? SYM.in_progress() : SYM.completed()} Model tests: ${esc(j.done.length)} done${j.running ? `, testing ${esc(j.current || '…')}, ${esc(j.queue.length)} waiting` : ''}${j.done.filter(x => !x.passed).length ? ` · ${j.done.filter(x => !x.passed).length} failed` : ''}</div>` : ''}
+      <p class="form-error" id="as-err" role="alert"></p>
+      <div class="table-wrap"><table><thead><tr><th>Agent</th><th>State</th><th>Code tests</th><th>Model test</th><th>Certification</th><th></th></tr></thead><tbody>
+        ${data.agents.map(a => `<tr>
+          <td><div class="agent-name">${esc(a.name)} <span class="mono faint">${esc(a.canonical_id)}</span></div><div class="agent-role">${esc(a.designation)} · needs ${esc(a.required_level)}</div></td>
+          <td>${esc(a.status)}</td>
+          <td>${testCell(a.code_test, true)}</td>
+          <td>${testCell(a.model_test, a.needs_model_test)}</td>
+          <td>${a.certification.valid ? `<span class="status-chip st-running">${esc(a.certification.level)} valid</span><div class="faint small">by ${esc(a.certification.certified_by)} · until ${esc(date(a.certification.expires_at))}</div>`
+            : `<span class="status-chip st-draft">Not valid</span><div class="faint small wrap">${esc(a.certification.reason)}</div>`}</td>
+          <td><div class="row" style="gap:6px;flex-wrap:nowrap">
+            <button class="btn btn-sm" data-detail="${esc(a.canonical_id)}">${open === a.canonical_id ? 'Hide' : 'Details'}</button>
+            ${!a.certification.valid ? `<button class="btn btn-sm btn-primary" data-cert="${esc(a.canonical_id)}" ${canCert && a.ready_to_certify ? '' : 'disabled'} title="${!canCert ? 'Only an assurance lead certifies' : a.ready_to_certify ? 'Certify on the evidence shown' : 'Evidence incomplete: ' + esc((a.evidence.code.ok ? '' : 'code tests: ' + a.evidence.code.ref + '. ') + (a.evidence.model.ok ? '' : 'model test: ' + a.evidence.model.ref))}">Certify</button>`
+              : `<button class="btn btn-sm btn-ghost" data-revoke="${esc(a.canonical_id)}" ${canCert ? '' : 'disabled'}>Revoke</button>`}
+          </div></td></tr>
+          ${open === a.canonical_id && detail ? `<tr><td colspan="6">${detailView(detail)}</td></tr>` : ''}`).join('')}
+      </tbody></table></div>`;
+    $$('[data-scope]', b).forEach(x => x.onclick = () => { scope = x.dataset.scope; load(); });
+    const err = m => { $('#as-err').textContent = m; };
+    $('#as-code').onclick = async () => {
+      const btn = $('#as-code'); btn.disabled = true; btn.textContent = 'Running…';
+      try { const r = await act(() => api('/api/assurance/code-tests', { method: 'POST', json: { agents: data.agents.map(a => a.canonical_id) } })); if (r) toast(`${r.passed} of ${r.runs} agents passed their code tests`); load(); }
+      catch (e) { err(e.message); btn.disabled = false; }
+    };
+    $('#as-model').onclick = async () => {
+      if (!confirm('Run the model tests for every thinking agent shown? They run one after another (1–2 minutes each) and share the model with running projects.')) return;
+      try { const r = await act(() => api('/api/assurance/model-tests', { method: 'POST', json: { agents: data.agents.map(a => a.canonical_id) } })); if (r) toast('Model tests started'); load(); }
+      catch (e) { err(e.message); }
+    };
+    $$('[data-detail]', b).forEach(x => x.onclick = async () => {
+      const id = x.dataset.detail; if (open === id) { open = null; detail = null; return render(); }
+      try { detail = await api('/api/assurance/agents/' + encodeURIComponent(id)); open = id; render(); } catch (e) { err(e.message); }
+    });
+    $$('[data-cert]', b).forEach(x => x.onclick = async () => {
+      if (!confirm(`Certify ${x.dataset.cert} on the evidence shown? Your name is recorded on the certification.`)) return;
+      try { const r = await act(() => api('/api/assurance/agents/' + encodeURIComponent(x.dataset.cert) + '/certify', { method: 'POST' })); if (r) toast(`${x.dataset.cert} certified ${r.certification.level}`); load(); }
+      catch (e) { err(e.message); }
+    });
+    $$('[data-revoke]', b).forEach(x => x.onclick = async () => {
+      const reason = prompt('Why is this certification revoked?'); if (!reason) return;
+      try { const r = await act(() => api('/api/assurance/agents/' + encodeURIComponent(x.dataset.revoke) + '/revoke', { method: 'POST', json: { reason } })); if (r) toast('Certification revoked'); load(); }
+      catch (e) { err(e.message); }
+    });
+  }
+  function detailView(d) {
+    const cases = r => r ? `<ul style="margin:4px 0 0;padding-left:18px">${r.cases.map(c => `<li class="small">${c.passed ? '✓' : '✗'} ${esc(c.name)} <span class="muted">— ${esc(c.detail)}</span></li>`).join('')}</ul>` : '<span class="muted small">no run yet</span>';
+    return `<div class="kn-card" style="padding:6px 0">
+      <div class="small"><b>Code tests</b> ${d.code_test ? '<span class="mono faint">' + esc(d.code_test.run_id) + '</span>' : ''}${cases(d.code_test)}</div>
+      ${d.needs_model_test ? `<div class="small"><b>Model test</b> ${d.model_test ? '<span class="mono faint">' + esc(d.model_test.run_id) + '</span>' : ''}${cases(d.model_test)}</div>` : ''}
+      <div class="small"><b>Certifications</b> ${d.certifications.length ? `<ul style="margin:4px 0 0;padding-left:18px">${d.certifications.map(c => `<li class="small">${esc(c.level)} ${c.scope === 'revoked' ? 'revoked by ' + esc(c.revoked_by) + ': ' + esc(c.reason) : 'by ' + esc(c.certified_by) + ' · ' + esc(c.scope)} <span class="faint">${esc(date(c.created_at))}</span></li>`).join('')}</ul>` : '<span class="muted small">none</span>'}</div>
+    </div>`;
+  }
+  load();
+}
+
 /* ======================================================================
    Knowledge — client profiles (Smriti) and the approved source library (Anvesh)
    ====================================================================== */

@@ -45,6 +45,16 @@ class DecisionRequest(BaseModel):
     note: str | None = Field(default=None, max_length=10000)
 
 
+CLIENT_ROLES = ("client_approver",)
+
+
+async def staff_user(user: dict = Depends(get_current_user)) -> dict:
+    """Internal team only: a client contact may sign off their own content at Gate 2, nothing else."""
+    if user.get("role") in CLIENT_ROLES:
+        raise HTTPException(status_code=403, detail="Client contacts can only sign off their own content at Gate 2.")
+    return user
+
+
 @router.get("")
 async def projects_list(status: str | None = None):
     """List projects, newest first. status: comma-separated filter."""
@@ -53,7 +63,7 @@ async def projects_list(status: str | None = None):
 
 
 @router.post("", status_code=201)
-async def projects_create(req: ProjectCreate, user: dict = Depends(get_current_user)):
+async def projects_create(req: ProjectCreate, user: dict = Depends(staff_user)):
     name = " ".join(req.name.split())
     if not name:
         raise HTTPException(status_code=400, detail="Give the project a name.")
@@ -132,7 +142,7 @@ async def project_summary(pid: str):
 
 
 @router.post("/{pid}/start")
-async def project_start(pid: str, req: StartRequest | None = None, user: dict = Depends(get_current_user)):
+async def project_start(pid: str, req: StartRequest | None = None, user: dict = Depends(staff_user)):
     try:
         await R.start_project(pid, req.message if req else None, user["username"])
     except R.ProjectError as e:
@@ -141,7 +151,7 @@ async def project_start(pid: str, req: StartRequest | None = None, user: dict = 
 
 
 @router.post("/{pid}/messages", status_code=201)
-async def project_message(pid: str, req: MessageRequest, user: dict = Depends(get_current_user)):
+async def project_message(pid: str, req: MessageRequest, user: dict = Depends(staff_user)):
     try:
         await R.add_message(pid, req.text, user["username"])
     except R.ProjectError as e:
@@ -150,7 +160,7 @@ async def project_message(pid: str, req: MessageRequest, user: dict = Depends(ge
 
 
 @router.post("/{pid}/pause")
-async def project_pause(pid: str, user: dict = Depends(get_current_user)):
+async def project_pause(pid: str, user: dict = Depends(staff_user)):
     try:
         await R.set_paused(pid, True, user["username"])
     except R.ProjectError as e:
@@ -159,7 +169,7 @@ async def project_pause(pid: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/{pid}/resume")
-async def project_resume(pid: str, user: dict = Depends(get_current_user)):
+async def project_resume(pid: str, user: dict = Depends(staff_user)):
     try:
         await R.set_paused(pid, False, user["username"])
     except R.ProjectError as e:
@@ -168,7 +178,7 @@ async def project_resume(pid: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/{pid}/stop")
-async def project_stop(pid: str, user: dict = Depends(get_current_user)):
+async def project_stop(pid: str, user: dict = Depends(staff_user)):
     try:
         await R.stop_project(pid, user["username"])
     except R.ProjectError as e:
@@ -177,7 +187,7 @@ async def project_stop(pid: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/{pid}/steps/{step_id}/retry")
-async def project_retry(pid: str, step_id: int, user: dict = Depends(get_current_user)):
+async def project_retry(pid: str, step_id: int, user: dict = Depends(staff_user)):
     try:
         await R.retry_step(pid, step_id, user["username"])
     except R.ProjectError as e:
@@ -190,7 +200,8 @@ async def project_decision(pid: str, request_id: str, req: DecisionRequest,
                            user: dict = Depends(get_current_user)):
     """Record a human decision once: approve, reject, or approve_with_changes (+ note)."""
     try:
-        return await R.decide(pid, request_id, req.decision, req.note, user["username"])
+        return await R.decide(pid, request_id, req.decision, req.note, user["username"],
+                              role=user.get("role"), user_client=user.get("client_id"))
     except R.ProjectError as e:
         raise _err(e)
 

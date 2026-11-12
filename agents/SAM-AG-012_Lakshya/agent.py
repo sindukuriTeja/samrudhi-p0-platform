@@ -105,6 +105,16 @@ HARD RULES — NEVER VIOLATE
     # ------------------------------------------------------------------
 
     @authority_guard("ceo.measure_kpi")
+    def evaluate_kpis(self, metrics: dict, targets: dict = None) -> dict:
+        """Compare the project's measured KPIs with their targets, in code (config/costing.yaml)."""
+        from datetime import datetime, timezone
+        from backend.core import costing
+        out = costing.evaluate(metrics or {}, targets)
+        out["measured_at"] = (metrics or {}).get("measured_at")
+        out["evaluated_at"] = datetime.now(timezone.utc).isoformat()
+        return out
+
+    @authority_guard("ceo.measure_kpi")
     def measure_kpi(
         self,
         kpi_id: str,

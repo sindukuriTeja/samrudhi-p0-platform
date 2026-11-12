@@ -119,3 +119,17 @@ def test_prakash_releases_only_human_approved_and_clean_content():
     assert r["status"] == "refused" and "post 1: x" in r["reasons"][0]
     r = pk.schedule_release(**base, approval={"decision": "reject", "decided_by": "vikram"}, final_check=clean)
     assert r["status"] == "refused"
+
+
+
+def test_overrule_drops_a_contradicted_reason_with_its_follow_on_sentence():
+    live = ("All posts are missing the required disclaimer 'Consult your doctor for advice about your health.' "
+            "despite the code having already checked for it. This is a critical compliance issue that needs to be "
+            "addressed before proceeding.")
+    kept, dropped = SR.overrule(live, [], 3)
+    assert kept == [] and len(dropped) == 1 and dropped[0].endswith("before proceeding.")
+    kept, dropped = SR.overrule("The disclaimer is missing. The tone of post 2 is too alarming. Please soften it.", [], 3)
+    assert kept == ["The tone of post 2 is too alarming. Please soften it."]
+    found = [{"post": 1, "rule": SR.MISSING_DISCLAIMER, "detail": "required disclaimer missing"}]
+    assert SR.overrule("The disclaimer is missing.", found, 3) == (["The disclaimer is missing."], [])
+    assert SR.overrule("The disclaimer is missing.", [], 0)[0] == ["The disclaimer is missing."]   # no posts: no overrule

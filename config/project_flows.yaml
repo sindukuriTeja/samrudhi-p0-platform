@@ -25,7 +25,7 @@
 #
 # Placeholders in tool args
 #   $project_id $project_name $client_id $today $scope $routing $active_agents $chain_permissions
-#   $checks $required_checks $tokens_total $model_steps $accepted_deliverables $cost_per_1k_tokens
+#   $checks $required_checks $tokens_total $model_steps $accepted_deliverables $metrics $cost_rates $kpi_targets
 #   $send_back_reasons $rework_round $result:<step>.<field> $output:<step>
 #   $text:<step> (all text in a step's structured record) $data:<step> (the record itself)
 
@@ -39,7 +39,6 @@ flows:
       schedule_days: 30
       max_per_agent: 10
       max_rework_rounds: 3
-      cost_per_1k_tokens: null           # set a real rate to get money figures; null = unavailable
       routing:                           # which agents produce each package type (Vitaran assigns)
         social_posts: [SAM-AG-082, SAM-AG-078, SAM-AG-083]
       required_checks: [shuddhi, pariksha, gunvatta, swasthya, gopniya]
@@ -313,6 +312,9 @@ flows:
           why: >-
             The direction and calendar decide everything that follows. The Blueprint makes the
             account owner approve them before any content is made (Human Approval Gate 1).
+          # Only the account owner decides (enforced in code).
+          signoff:
+            - {party: account_owner, label: the account owner, roles: [client_experience_lead, founder]}
           rerun: [direction, calendar, distribution]
 
       # ---------------- Block 6: Make the content ----------------
@@ -484,6 +486,10 @@ flows:
             for external publication, with zero tolerance for unauthorised publishing or incorrect
             clinical claims. Agents only screen; a qualified person and the client approve
             (Human Approval Gate 2).
+          # Both must approve (enforced in code); either can reject or ask for changes.
+          signoff:
+            - {party: reviewer, label: a qualified reviewer, roles: [assurance_lead, founder]}
+            - {party: client, label: the client's authorised contact, roles: [client_approver], client: true}
           rerun: [writing, design_brief, artwork, shuddhi, pariksha, gunvatta, swasthya, gopniya, nirikshan, pramaan, sweekriti]
 
       # ---------------- Block 8: Send and publish ----------------
@@ -588,8 +594,9 @@ flows:
         tag: Service cost
         responsibility: Works out cost per accepted deliverable from the run log
         gives: Cost figure to Medha
-        method: summarise_run_cost
-        args: {tokens: $tokens_total, steps: $model_steps, accepted_deliverables: $accepted_deliverables, cost_per_1k_tokens: $cost_per_1k_tokens}
+        # Measured from the execution log and the project's records; rates in config/costing.yaml.
+        method: cost_report
+        args: {metrics: $metrics, rates: $cost_rates, currency: $currency}
       - key: intelligence
         output: {summary: str, figures: [{name: str, value: str}], unavailable: [str]}
         block: 9
@@ -607,19 +614,15 @@ flows:
 
       # ---------------- Block 10: Close ----------------
       - key: kpi_status
-        output: {status: str, gaps: [str], next_measures: [str]}
         block: 10
         agent: SAM-AG-012                # Lakshya - Enterprise KPI Intelligence
-        mode: think
-        action: measure
-        permission: ceo.measure_kpi
+        mode: tool
         tag: KPI status
         responsibility: Compares results with targets and flags gaps
         gives: KPI status to Arjun
-        inputs: [intelligence]
-        instruction: >-
-          Compare the results with the targets. If no targets or results exist, say so plainly and
-          list what must be measured next. Keep it under 80 words.
+        # KPIs measured in code from the project's records; targets in config/costing.yaml.
+        method: evaluate_kpis
+        args: {metrics: $metrics, targets: $kpi_targets}
       - key: review_notes
         output: {notes: [str], actions: [{action: str, owner: str}]}
         block: 10

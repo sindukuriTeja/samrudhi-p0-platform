@@ -95,3 +95,24 @@ class ApprovalDecision(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )
     details: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class ApprovalSignoff(Base):
+    """Append-only: each party's sign-off on a gate that needs several (Gate 2: reviewer + client).
+
+    approval_decisions keeps exactly one final row per request; this table records who signed
+    for which party on the way there.
+    """
+    __tablename__ = "approval_signoffs"
+
+    id: Mapped[int] = mapped_column(INTEGER, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, index=True)
+    party: Mapped[str] = mapped_column(VARCHAR(30), nullable=False)          # reviewer | client
+    decision: Mapped[str] = mapped_column(VARCHAR(30), nullable=False)
+    note: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    decided_by: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
+    role: Mapped[str | None] = mapped_column(VARCHAR(50), nullable=True)
+    decided_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (Index("uq_signoff_request_party", "request_id", "party", unique=True),)

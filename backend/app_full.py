@@ -25,6 +25,7 @@ from backend.projects.runner import runner
 from backend.routes import projects as projects_routes
 from backend.routes import workforce as workforce_routes
 from backend.routes import knowledge as knowledge_routes
+from backend.routes import assurance as assurance_routes
 from config.settings import get_settings
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,6 +35,7 @@ LEGACY_DIR = os.path.join(ROOT, "frontend")
 app.include_router(projects_routes.router)
 app.include_router(workforce_routes.router)
 app.include_router(knowledge_routes.router)
+app.include_router(assurance_routes.router)
 
 
 async def _redis_reconnect_loop() -> None:

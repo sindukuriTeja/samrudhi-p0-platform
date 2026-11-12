@@ -197,3 +197,72 @@ def prompt_text(rules: dict) -> str:
     if rules.get("other_client_names"):
         lines.append("Never mention other clients.")
     return " ".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# what the code has already decided (so a model reviewer neither repeats nor contradicts it)
+# ---------------------------------------------------------------------------
+
+# Rules the code checks exactly; a model's complaint about one of them is tested against the code.
+VERIFIABLE = {
+    MISSING_DISCLAIMER: re.compile(r"disclaimer", re.I),
+    OTHER_CLIENT: re.compile(r"\b(other|another) client|competitor", re.I),
+    MISSING_FIELD: re.compile(r"\b(missing|no|lacks?|without)\s+(a\s+|the\s+)?(headline|caption|call[ -]to[ -]action)"
+                              r"|\b(headline|caption|call[ -]to[ -]action)s?\s+(is|are)\s+(missing|empty)", re.I),
+}
+
+
+def code_summary(findings: list[dict], posts_checked: int, rules: dict) -> str:
+    """One paragraph telling a reviewer what the code has verified on the current posts."""
+    if not posts_checked:
+        return ""
+    kinds = {f["rule"] for f in findings}
+    lines = []
+    if rules.get("required_disclaimers"):
+        lines.append("the required disclaimer is " + ("MISSING in some posts" if MISSING_DISCLAIMER in kinds
+                                                        else f"present in all {posts_checked} posts"))
+    lines.append("forbidden claims and wording: " + ("FOUND" if kinds & {FORBIDDEN_CLAIM, FORBIDDEN_PATTERN} else "none"))
+    lines.append("headline, caption and call to action: " + ("some are EMPTY" if MISSING_FIELD in kinds else "filled in"))
+    lines.append("other clients named: " + ("YES" if OTHER_CLIENT in kinds else "none"))
+    if UNSUPPORTED_STATISTIC in kinds:
+        lines.append("some figures are NOT in the verified research")
+    text = "The code has already checked these posts: " + "; ".join(lines) + "."
+    if findings:
+        text += " Code findings: " + "; ".join(describe(f) for f in findings[:8]) + "."
+    return text + " Do not re-check these; review medical accuracy, facts against the research, and brand fit."
+
+
+# A sentence that only points back ("This is a critical issue…") belongs to the sentence before it.
+_FOLLOW_ON = re.compile(r"^(this|these|that|those|it|they|such|which|please|so|therefore|hence)\b", re.I)
+
+
+def split_reasons(reasons) -> list[str]:
+    items = reasons if isinstance(reasons, list) else [reasons]
+    out = []
+    for r in items:
+        first = True
+        for part in re.split(r"(?<=[.!?;])\s+", str(r or "")):
+            part = part.strip()
+            if not part:
+                continue
+            if out and not first and _FOLLOW_ON.match(part):
+                out[-1] = f"{out[-1]} {part}"
+            else:
+                out.append(part)
+            first = False
+    return out
+
+
+def overrule(reasons, findings: list[dict], posts_checked: int) -> tuple[list[str], list[str]]:
+    """(kept, overruled): a reason about a rule the code verified as satisfied is overruled."""
+    if not posts_checked:
+        return split_reasons(reasons), []
+    kinds = {f["rule"] for f in findings}
+    kept, dropped = [], []
+    for r in split_reasons(reasons):
+        hit = [k for k, pat in VERIFIABLE.items() if pat.search(r)]
+        if hit and all(k not in kinds for k in hit):
+            dropped.append(r)
+        else:
+            kept.append(r)
+    return kept, dropped

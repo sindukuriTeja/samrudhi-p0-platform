@@ -51,6 +51,20 @@ def _step_out(st: ProjectStep, names: dict, superseded: bool, flow: dict | None 
     }
 
 
+def _signoff(flow, st, rows) -> list[dict]:
+    """Gate 2: each party that must approve, and who has signed so far."""
+    if flow is None or st is None:
+        return []
+    from backend.projects.flow import step_def
+    parties = ((step_def(flow, st.step_key) or {}).get("approval") or {}).get("signoff") or []
+    out = []
+    for x in parties:
+        r = next((d for d in rows if d.party == x["party"]), None)
+        out.append({"party": x["party"], "label": x["label"], "roles": x.get("roles") or [],
+                    "signed_by": r.decided_by if r else None, "decision": r.decision if r else None})
+    return out
+
+
 async def project_state(pid: str) -> dict:
     async with async_session_maker() as s:
         p = await s.get(Project, pid)
@@ -66,6 +80,9 @@ async def project_state(pid: str) -> dict:
             Approval.request_id.in_(appr_ids)))).scalars().all() if appr_ids else []
         decisions = {d.request_id: d for d in (await s.execute(select(ApprovalDecision).where(
             ApprovalDecision.request_id.in_(appr_ids)))).scalars().all()} if appr_ids else {}
+        from backend.models.projects import ApprovalSignoff
+        signoffs = (await s.execute(select(ApprovalSignoff).where(
+            ApprovalSignoff.request_id.in_(appr_ids)))).scalars().all() if appr_ids else []
 
     try:
         flow = get_flow(p.flow_key)
@@ -89,6 +106,7 @@ async def project_state(pid: str) -> dict:
             "decided_by": dec.decided_by if dec else a.decided_by,
             "decided_at": iso(dec.decided_at if dec else a.decided_at),
             "pending": a.decision is None,
+            "signoff": _signoff(flow, st, [d for d in signoffs if d.request_id == a.request_id]),
         })
     msg_out = []
     for m in msgs:
