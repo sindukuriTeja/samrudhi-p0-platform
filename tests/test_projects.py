@@ -392,6 +392,7 @@ async def test_completed_project_is_saved_to_the_registers(monkeypatch, no_kick)
         assert (await one(select(Initiative).where(Initiative.objective_ref == pid))).scalars().first().milestones
         wps = (await one(select(WorkPackage).where(WorkPackage.workflow_id == wf.id))).scalars().all()
         assert len(wps) == 3 and all(w.deadline and w.assigned_agent == "SAM-AG-082" for w in wps)
+        assert {w.status for w in wps} == {"delivered"}
         allocs = (await one(select(Allocation).where(Allocation.decision_ref == pid))).scalars().all()
         assert len(allocs) == 9                                      # 3 packages x Lekha, Roop, Chitra
         assert (await one(select(ContentStrategy).where(ContentStrategy.strategy_id == f"STR-{pid}-R1"))).scalars().first()
@@ -426,3 +427,83 @@ async def test_research_is_never_marked_verified_without_a_source(monkeypatch, n
     assert research["facts"] and all(f["verified"] is False for f in research["facts"])
     msg = next(m for m in st["messages"] if m["step_tag"] == "Research")
     assert msg["text"].startswith("No live source connector")
+
+
+# ---------------------------------------------------------------------------
+# planning agents drive the run
+# ---------------------------------------------------------------------------
+
+from backend.projects.flow import _load as _load_flows
+
+
+def _defaults():
+    return _load_flows()["flows"]["documented_chain"]["defaults"]
+
+
+async def test_producers_get_exactly_the_planned_packages(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    seen = {}
+    stub(monkeypatch, seen=seen)
+    await R.start_project(pid, "Make 4 posts for World Diabetes Day.", "tester")
+    st = await run_until_blocked(pid)
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    st = await run_until_blocked(pid)                                        # Gate 2
+
+    planned = {p["package_id"]: p["due_date"] for p in steps_of(st, "schedule")[0]["result"]["packages"]}
+    assert len(planned) == 4
+    for agent in ("SAM-AG-082", "SAM-AG-078", "SAM-AG-083"):                 # Lekha, Roop, Chitra
+        task, ctx = seen[agent][0]
+        got = {p["package_id"]: p["due_date"] for p in ctx["work_packages"]}
+        assert got == planned                                                # Sankalan's ids, Samay's dates
+        assert "assigned 4 work package" in task
+    assert len(steps_of(st, "writing")[0]["result"]["posts"]) == 4
+    pipe = [m["text"] for m in st["messages"] if m["kind"] == "pipeline"]
+    assert len(pipe) == 1 and "SAM-AG-082 (4 package(s)), then SAM-AG-078 (4 package(s)), then SAM-AG-083" in pipe[0]
+    assert steps_of(st, "pipeline")[0]["result"]["status"] == "defined"
+
+
+async def test_producer_without_packages_is_skipped_and_not_reworked(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    monkeypatch.setitem(_defaults()["routing"], "social_posts", ["SAM-AG-082", "SAM-AG-078"])   # no Chitra
+    pid = await _new_project()
+    stub(monkeypatch, verdicts={"SAM-AG-080": ["send_back: caption 1 needs a source"]})
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    st = await run_until_blocked(pid)
+    art = steps_of(st, "artwork")
+    assert len(art) == 1 and art[0]["status"] == "skipped" and "no work packages" in art[0]["summary"]
+    assert [x["round"] for x in steps_of(st, "writing")] == [1, 2]           # rework round happened
+    assert st["pending_approval"]["agent_id"] == "SAM-AG-052"               # Gate 2 still reached
+
+
+async def test_capacity_limit_leaves_packages_unassigned(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    monkeypatch.setitem(_defaults(), "max_per_agent", 2)
+    pid = await _new_project()
+    stub(monkeypatch)
+    await R.start_project(pid, "Make 3 posts.", "tester")
+    st = await run_until_blocked(pid)
+    cap = steps_of(st, "capacity")[0]["result"]
+    assert cap["status"] == "capacity_warning"                               # Kshamata warned
+    asg = steps_of(st, "assignments")[0]
+    assert asg["status"] == "needs_attention" and "at capacity (2)" in asg["error"]
+    assert st["project"]["status"] == "needs_attention"
+    assert not steps_of(st, "writing")[0]["started_at"]                      # production never started
+
+
+async def test_inactive_producer_is_not_assigned(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch)
+    await R.start_project(pid, None, "tester")
+    async with async_session_maker() as s:
+        chitra = (await s.execute(select(Agent).where(Agent.canonical_id == "SAM-AG-083"))).scalars().first()
+        chitra.status = "restricted"
+        await s.commit()
+    st = await run_until_blocked(pid)
+    asg = steps_of(st, "assignments")[0]
+    assert asg["status"] == "needs_attention" and "SAM-AG-083 is not Active" in asg["error"]
+    await _ensure_agents("active")
+

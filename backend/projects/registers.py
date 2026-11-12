@@ -90,10 +90,24 @@ async def _packages(s, pid: str) -> list[ContentPackage]:
     return list(rows)
 
 
+async def _mark_work_packages(s, ids: list[str], status: str) -> int:
+    n = 0
+    for pid_ in ids:
+        row = (await s.execute(select(WorkPackage).where(WorkPackage.package_id == pid_))).scalars().first()
+        if row is not None and row.status != "delivered":
+            row.status = status
+            n += 1
+    return n
+
+
 async def save(s, p, st: ProjectStep, data: dict) -> list[dict]:
     """Write the step's structured output to its register(s). Unknown steps write nothing."""
     pid, key, now = p.id, st.step_key, utcnow()
     refs: list[dict] = []
+    assigned = [x.get("package_id") for x in (st.result_json or {}).get("_packages") or []]
+    if assigned and key in ("writing", "design_brief", "artwork"):
+        n = await _mark_work_packages(s, assigned, "in_production")
+        refs.append({"table": "work_packages", "id": f"{n} in production"})
 
     if key == "kickoff":
         ini = (await s.execute(select(Initiative).where(Initiative.objective_ref == pid))).scalars().first()
@@ -235,6 +249,10 @@ async def save(s, p, st: ProjectStep, data: dict) -> list[dict]:
     elif key == "publishing":
         for row in await _packages(s, pid):
             row.status = "scheduled"
+        wf = await _workflow(s, pid)
+        if wf is not None:
+            for wp in (await s.execute(select(WorkPackage).where(WorkPackage.workflow_id == wf.id))).scalars().all():
+                wp.status = "delivered"
         await move_workflow(s, pid, "delivered", "Prakash recorded the schedule")
         refs.append({"table": "content_packages", "id": "scheduled"})
 

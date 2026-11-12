@@ -550,7 +550,7 @@ async function viewProject(pid) {
         else if (s.status === 'needs_attention') line = awaiting ? `<span style="color:var(--amber)">Waiting for your decision</span>`
           : s.superseded ? `<span class="muted">Retried in a new round</span>` : `<span style="color:#ff8a9b" title="${esc(s.error || '')}">${esc((s.error || 'Needs attention').slice(0, 90))}${(s.error || '').length > 90 ? '…' : ''}</span>`;
         else if (s.status === 'skipped') line = `<span class="faint" title="${esc(s.summary || '')}">Skipped${s.summary ? ' · ' + esc(s.summary.slice(0, 70)) + (s.summary.length > 70 ? '…' : '') : ''}</span>`;
-        else line = `<span class="muted">${s.source_approval_id ? 'Queued · uses your note' : (s.round > 1 ? 'Queued · new round' : 'Queued')}</span>`;
+        else line = `<span class="muted">${s.source_approval_id ? 'Queued · uses your note' : (s.round > 1 ? 'Queued · new round' : 'Queued')}${s.packages ? ` · ${s.packages} package${s.packages === 1 ? '' : 's'}` : ''}</span>`;
         if (s.status === 'completed' && s.passed === false) line = `<span style="color:var(--amber)">Sent back · ${clock(s.elapsed_s)}</span>`;
         const modeTag = s.mode === 'tool' ? ' <span class="tag" title="Runs in code, no model">code</span>' : '';
         return `${head}<div class="rp-step${s.status === 'in_progress' ? ' cur' : ''}${s.status === 'needs_attention' && !s.superseded ? ' att' : ''}">${s.status === 'skipped' ? SYM.skipped() : stepSym(s, pendingIds)}

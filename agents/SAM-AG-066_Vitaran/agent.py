@@ -252,16 +252,33 @@ HARD RULES — NEVER VIOLATE
         }
 
     @authority_guard("ops.assign_packages")
-    def assign_packages(self, packages: list, routing: dict, active_agents: list) -> dict:
-        """Assign each package to the qualified agents for its type; only Active agents qualify."""
+    def assign_packages(self, packages: list, routing: dict, active_agents: list,
+                        max_per_agent: int | None = None) -> dict:
+        """Assign each package to every qualified agent for its type.
+
+        An agent qualifies only if it is Active and still has capacity (max_per_agent).
+        A package that cannot get all of its agents stays unassigned, with the reason.
+        """
         active = set(active_agents or [])
+        load: dict = {}
         out, unassigned = [], []
         for p in packages or []:
             wanted = (routing or {}).get(p.get("type"), [])
-            got = [a for a in wanted if a in active]
-            if not got or len(got) < len(wanted):
-                unassigned.append(p.get("package_id"))
-            out.append({**p, "assigned_to": got})
-        return {"assignments": out, "unassigned": unassigned,
+            reasons = []
+            if not wanted:
+                reasons.append(f"no agent is routed for package type '{p.get('type')}'")
+            for a in wanted:
+                if a not in active:
+                    reasons.append(f"{a} is not Active")
+                elif max_per_agent is not None and load.get(a, 0) >= max_per_agent:
+                    reasons.append(f"{a} is at capacity ({max_per_agent})")
+            if reasons:
+                unassigned.append({"package_id": p.get("package_id"), "reasons": reasons})
+                out.append({**p, "assigned_to": []})
+                continue
+            for a in wanted:
+                load[a] = load.get(a, 0) + 1
+            out.append({**p, "assigned_to": list(wanted)})
+        return {"assignments": out, "unassigned": unassigned, "load": load,
                 "status": "assigned" if not unassigned else "blocked_unassigned",
                 "assigned_at": datetime.now(timezone.utc).isoformat()}

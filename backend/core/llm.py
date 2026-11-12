@@ -38,7 +38,7 @@ async def generate(
     system: str | None = None,
     model: str | None = None,
     temperature: float = 0.3,
-    timeout_s: float = 120.0,
+    timeout_s: float | None = None,
     format: str | None = None,
 ) -> LLMResult:
     """Call Ollama with the given prompt, serialized across all agents.
@@ -47,6 +47,7 @@ async def generate(
     unavailable' honestly — never fake output).
     """
     model = model or settings.ollama_model
+    timeout_s = timeout_s or settings.llm_timeout_s
     url = f"{settings.ollama_url.rstrip('/')}/api/generate"
 
     payload = {

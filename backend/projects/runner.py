@@ -107,8 +107,18 @@ async def _insert_rounds(s, pid: str, after_seq: int, step_keys: list[str], flow
         .values(seq=ProjectStep.seq + n)
     )
     created = []
+    production = set(_production_keys(flow))
     for i, key in enumerate(step_keys, start=1):
         d = step_def(flow, key)
+        latest_any = (await s.execute(select(ProjectStep).where(
+            ProjectStep.project_id == pid, ProjectStep.step_key == key)
+            .order_by(ProjectStep.seq.desc()).limit(1))).scalars().first()
+        if key in production and latest_any is not None and latest_any.status == "skipped" \
+                and not (latest_any.result_json or {}).get("_packages"):
+            continue  # Vitaran assigned this producer no packages: no new round either
+        carry = {}
+        if latest_any is not None and (latest_any.result_json or {}).get("_packages") is not None:
+            carry["_packages"] = latest_any.result_json["_packages"]
         max_round = (await s.execute(
             select(func.max(ProjectStep.round)).where(
                 ProjectStep.project_id == pid, ProjectStep.step_key == key)
@@ -117,7 +127,7 @@ async def _insert_rounds(s, pid: str, after_seq: int, step_keys: list[str], flow
             project_id=pid, seq=after_seq + i, step_key=key, agent_id=d["agent"],
             responsibility=d["responsibility"], tag=d["tag"], round=max_round + 1,
             status="queued", source_approval_id=source_approval_id,
-            result_json=dict((prefill or {}).get(key) or {}) or None,
+            result_json={**carry, **dict((prefill or {}).get(key) or {})} or None,
         )
         s.add(st)
         created.append(st)
@@ -156,6 +166,28 @@ def _scope(flow: dict, human_texts: list[str]) -> dict:
         if m:
             scope["social_posts"] = int(m.group(1))
     return scope
+
+
+def _production_keys(flow: dict) -> list[str]:
+    return list((flow.get("defaults") or {}).get("production_steps") or [])
+
+
+async def _production_plan(s, pid: str, flow: dict) -> list[dict]:
+    """Vitaran's assignments turned into one entry per producing step, with Samay's due dates."""
+    assign = await _latest(s, pid, "assignments")
+    rows = ((assign.result_json or {}) if assign else {}).get("assignments") or []
+    names = await _agent_names(s)
+    plan = []
+    for key in _production_keys(flow):
+        d = step_def(flow, key)
+        if d is None:
+            continue
+        pkgs = [{"package_id": r.get("package_id"), "type": r.get("type"), "sequence": r.get("sequence"),
+                 "due_date": r.get("due_date")} for r in rows if d["agent"] in (r.get("assigned_to") or [])]
+        if pkgs:
+            plan.append({"step": key, "agent": d["agent"], "agent_name": names.get(d["agent"], d["agent"]),
+                         "tag": d["tag"], "packages": pkgs})
+    return plan
 
 
 def _passed(st: ProjectStep | None) -> bool:
@@ -208,6 +240,8 @@ async def _resolve(value, s, p: Project, step: ProjectStep, flow: dict):
             Agent.status.in_(RUNNABLE_STATES)))).scalars().all())
     if name == "chain_permissions":
         return chain_permissions(flow)
+    if name == "production_plan":
+        return await _production_plan(s, p.id, flow)
     if name == "chain_steps":
         names = await _agent_names(s)
         return [f"{names.get(d['agent'], d['agent'])} · {d['tag']}" for d in flow["steps"]]
@@ -427,7 +461,7 @@ class ProjectRunner:
             shape = json.dumps(schema.example(d["output"]), ensure_ascii=False)
             parts.append("Answer with ONE JSON object in exactly this shape (same keys; lists may hold as many "
                          f"items as needed): {shape}. Write \"unavailable\" for anything you do not know.")
-            count = await self._expected_count(s, p, d)
+            count = await self._expected_count(s, p, d, step)
             if count:
                 parts.append(f"The list \"{d['count']['field']}\" must contain exactly {count} items, one per post.")
             if d.get("verdict"):
@@ -442,16 +476,24 @@ class ProjectRunner:
             "step": d.get("tag"), "round": step.round,
             "human_instructions": humans, "handed_over": handed_over,
         }
+        packages = (step.result_json or {}).get("_packages")
+        if packages:
+            context["work_packages"] = packages
+            parts.insert(1, f"You were assigned {len(packages)} work package(s) by Vitaran (see work_packages). "
+                            "Produce exactly one item per package, in package order, ready by its due date.")
         if previous_own:
             context["your_previous_round"] = previous_own[:INPUT_CHARS]
         if note:
             context["revision_note"] = note
         return "\n".join(x for x in parts if x), context
 
-    async def _expected_count(self, s, p: Project, d: dict) -> int | None:
+    async def _expected_count(self, s, p: Project, d: dict, step: ProjectStep | None = None) -> int | None:
         rule = d.get("count")
         if not rule:
             return None
+        packages = (step.result_json or {}).get("_packages") if step is not None else None
+        if packages is not None:
+            return len(packages)
         scope = _scope(get_flow(p.flow_key), await _human_texts(s, p.id))
         return int(scope.get(rule.get("scope", "social_posts"), 0)) or None
 
@@ -508,7 +550,7 @@ class ProjectRunner:
             if d.get("output"):
                 data = schema.extract_json(output)
                 errs = ["the answer was not a JSON object"] if data is None else schema.validate(data, d["output"])
-                count = await self._expected_count(s, p, d)
+                count = await self._expected_count(s, p, d, st)
                 if data is not None and not errs and count:
                     got = len(data.get(d["count"]["field"]) or [])
                     if got != count:
@@ -552,6 +594,8 @@ class ProjectRunner:
         pid = p.id
         st.ended_at = utcnow()
         rj = dict(structured or {})
+        if (st.result_json or {}).get("_packages") is not None:
+            rj["_packages"] = st.result_json["_packages"]
         rj["_passed"] = passed
         st.result_json = rj
         text = readable(raw_text)
@@ -611,10 +655,38 @@ class ProjectRunner:
             return False
 
         st.status = "completed"
+        if st.step_key == "pipeline":
+            await self._apply_plan(s, p, flow)
         keep_going = p.status == "running"
         await s.commit()
         await notify("project", pid)
         return keep_going
+
+    async def _apply_plan(self, s, p: Project, flow: dict) -> None:
+        """Pravartan's pipeline: each producer runs for exactly the packages Vitaran assigned to it."""
+        plan = {x["step"]: x for x in await _production_plan(s, p.id, flow)}
+        names = await _agent_names(s)
+        lines = []
+        for key in _production_keys(flow):
+            d = step_def(flow, key)
+            queued = (await s.execute(select(ProjectStep).where(
+                ProjectStep.project_id == p.id, ProjectStep.step_key == key,
+                ProjectStep.status == "queued"))).scalars().all()
+            entry = plan.get(key)
+            for qs in queued:
+                if entry:
+                    qs.result_json = {**(qs.result_json or {}), "_packages": entry["packages"]}
+                else:
+                    qs.status = "skipped"
+                    qs.started_at = qs.ended_at = utcnow()
+                    qs.summary = (f"Vitaran assigned no work packages to {names.get(d['agent'], d['agent'])}, "
+                                  "so this step is skipped.")
+                    s.add(_sys_msg(p.id, f"{names.get(d['agent'], d['agent'])} · {d['tag']}: skipped. {qs.summary}",
+                                   "skipped", qs.id))
+            if entry:
+                lines.append(f"{entry['agent_name']} ({len(entry['packages'])} package(s))")
+        s.add(_sys_msg(p.id, "Pravartan started the production pipeline from Vitaran's assignments: "
+                             + (", then ".join(lines) if lines else "no producer has work") + ".", "pipeline"))
 
     async def _send_back(self, s, p: Project, st: ProjectStep, d: dict, flow: dict, reasons: list[str]) -> None:
         """Checker sent the work back: Punargathan opens a rework round, the producers run again, checks repeat."""

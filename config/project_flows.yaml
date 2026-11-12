@@ -43,6 +43,9 @@ flows:
       routing:                           # which agents produce each package type (Vitaran assigns)
         social_posts: [SAM-AG-082, SAM-AG-078, SAM-AG-083]
       required_checks: [shuddhi, pariksha, gunvatta, swasthya, gopniya]
+      # Production steps are driven by the plan: each runs only for the work packages Vitaran
+      # assigned to its agent (with Samay's due dates); a producer with no packages is skipped.
+      production_steps: [writing, design_brief, artwork]
     rework:
       key: rework
       agent: SAM-AG-071                  # Punargathan - Rework Coordination
@@ -208,10 +211,10 @@ flows:
         agent: SAM-AG-066                # Vitaran - Task Allocation
         mode: tool
         tag: Assignments
-        responsibility: Assigns each package to a qualified, Active agent
+        responsibility: Assigns each package to a qualified, Active agent with capacity
         gives: Assignments to Pravartan
         method: assign_packages
-        args: {packages: $result:schedule.packages, routing: $routing, active_agents: $active_agents}
+        args: {packages: $result:schedule.packages, routing: $routing, active_agents: $active_agents, max_per_agent: $max_per_agent}
         pass_if: {status: assigned}
         on_fail: block
       - key: pipeline
@@ -219,10 +222,12 @@ flows:
         agent: SAM-AG-061                # Pravartan - Workflow Orchestration Lead
         mode: tool
         tag: Pipeline
-        responsibility: Sets the handoff order and starts the pipeline
-        gives: Pipeline started, to Aarya
+        responsibility: Turns the assignments into the production plan and starts it
+        gives: Pipeline started; the runner follows this plan for production
         method: define_handoff_order
-        args: {workflow_ref: $project_id, steps: $chain_steps}
+        args: {workflow_ref: $project_id, steps: $production_plan}
+        pass_if: {status: defined}
+        on_fail: block
 
       # ---------------- Block 5: Decide the content ----------------
       - key: creative_request
