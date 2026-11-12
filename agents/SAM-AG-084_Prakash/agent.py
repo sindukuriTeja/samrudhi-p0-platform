@@ -125,8 +125,32 @@ HARD RULES — NEVER VIOLATE
         content_ref: str,
         scheduled_time: str,
         channels: list,
+        approval: dict = None,
+        final_check: dict = None,
     ) -> dict:
-        """Schedule a content release."""
+        """Schedule a content release.
+
+        Release guard (in code): when the approval and the final check are given, content is
+        scheduled only if a signed-in human approved it (Gate 2) and the final safety check of
+        the exact copy being released found nothing. Otherwise nothing is scheduled.
+        """
+        reasons = []
+        if approval is not None:
+            if (approval or {}).get("decision") not in ("approve", "approve_with_changes"):
+                reasons.append("the final content has no human approval (Gate 2)")
+            elif not approval.get("decided_by") or str(approval.get("decided_by")).startswith("SAM-AG-"):
+                reasons.append("the approval was not made by a signed-in human")
+        if final_check is not None and not (final_check or {}).get("passed"):
+            found = (final_check or {}).get("findings") or ["the final check did not pass"]
+            reasons.append("the final safety check found: " + "; ".join(str(x) for x in found[:5]))
+        if reasons:
+            return {
+                "client_id": client_id,
+                "content_ref": content_ref,
+                "status": "refused",
+                "reasons": reasons,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
         schedule_id = f"SCH-{uuid.uuid4().hex[:6].upper()}"
         return {
             "schedule_id": schedule_id,

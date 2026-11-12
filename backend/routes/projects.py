@@ -88,6 +88,16 @@ async def projects_history(q: str | None = None):
     return await queries.history(q)
 
 
+@router.get("/safety-rules")
+async def projects_safety_rules(client_id: str | None = None):
+    """The content safety rules the checks enforce in code for a client (config/safety_rules.yaml).
+
+    Read-only: rules are changed in the file and reviewed like code, not edited from the browser.
+    """
+    from backend.core import safety_rules
+    return safety_rules.rules_for(client_id or get_settings().default_tenant_id)
+
+
 @router.get("/{pid}")
 async def project_detail(pid: str):
     """Full state: project, steps, conversation, approvals, counts."""

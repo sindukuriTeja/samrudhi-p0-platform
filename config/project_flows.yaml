@@ -330,6 +330,7 @@ flows:
         gives: Draft copy to Roop and Shuddhi
         deliverable: Copy
         inputs: [calendar, research, client_context]
+        safety_rules: true               # the client's rules are given to the writer (code still checks them)
         instruction: >-
           Write the copy for every post in the calendar: caption, headline and one call to action.
           Use only the research facts. No medical advice, no cure claims. Write only the posts.
@@ -378,8 +379,12 @@ flows:
         tag: Claim screening
         responsibility: Checks medical claims, facts and brand fit
         gives: Pass, or a send-back with reasons
-        inputs: [writing, artwork, client_context]
+        inputs: [writing, artwork, research, client_context]
         verdict: true
+        safety_rules: true
+        # Decided in code after the model's review: a finding forces a send-back.
+        code_rules: {posts_from: writing, evidence_from: research,
+                     rules: [forbidden_claim, forbidden_pattern, unsupported_statistic, other_client]}
         instruction: >-
           Screen the copy and the artwork specification for unsupported medical claims, wrong facts
           and brand problems. Do not rewrite the posts. List each problem in one line.
@@ -408,7 +413,8 @@ flows:
         responsibility: Scores quality independently
         gives: Score to Swasthya
         method: evaluate_output
-        args: {content: $text:writing, producer_agent: SAM-AG-082, required_elements: []}
+        args: {content: $text:writing, producer_agent: SAM-AG-082, posts: $result:writing.posts,
+               required_fields: $safety:post_fields, max_chars: $safety:max_caption_chars}
         pass_if: {passed: true}
         on_fail: send_back
         send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
@@ -420,7 +426,8 @@ flows:
         responsibility: Blocks high-risk medical and advertising claims
         gives: Pass or block, to Gopniya
         method: screen_claims
-        args: {content: $text:writing}
+        args: {content: $text:artwork, posts: $result:writing.posts, extra_forbidden: $safety:forbidden_claims,
+               patterns: $safety:forbidden_patterns, required_disclaimers: $safety:required_disclaimers}
         pass_if: {status: pass}
         on_fail: send_back
         send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
@@ -432,7 +439,7 @@ flows:
         responsibility: Checks no personal or other-client data appears
         gives: Privacy pass to Nirikshan
         method: check_privacy
-        args: {content: $text:writing}
+        args: {content: $text:writing, other_client_names: $safety:other_client_names}
         pass_if: {status: pass}
         on_fail: send_back
         send_back: {to: [writing, design_brief, artwork], recheck_from: shuddhi}
@@ -501,7 +508,11 @@ flows:
         responsibility: Schedules only approved content
         gives: Publication record to Sangrah
         method: schedule_release
-        args: {client_id: $client_id, content_ref: $project_id, scheduled_time: $today, channels: [as per distribution plan]}
+        # Release guard in code: a human approved Gate 2 and a fresh check of the final copy is clean.
+        args: {client_id: $client_id, content_ref: $project_id, scheduled_time: $today,
+               channels: [as per distribution plan], approval: $gate:sweekriti, final_check: $safety_check:writing}
+        pass_if: {status: scheduled}
+        on_fail: block
         note: >-
           No publishing connector is set up, so this only records the schedule. Nothing is posted.
 

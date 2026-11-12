@@ -1,0 +1,69 @@
+# Safety rules enforced in CODE, not in prompts (Blueprint: "rules enforced in code, not prompts").
+#
+# `global` applies to every client. A client's own block is added on top: a client can add
+# forbidden claims, patterns and disclaimers, but can never remove a global rule.
+#
+# Who enforces what (backend/core/safety_rules.py does the matching):
+#   Shuddhi  (SAM-AG-080)  code verdict after the model's review: forbidden claims and
+#                          statistics that are not in Anvesh's research pack force a send-back.
+#   Gunvatta (SAM-AG-183)  every post has its fields filled in and is within the length limit.
+#   Swasthya (SAM-AG-186)  forbidden claims, forbidden patterns and the client's required disclaimer.
+#   Gopniya  (SAM-AG-187)  personal data and other clients' names.
+#   Prakash  (SAM-AG-084)  release guard: publishes only after a human approved Gate 2 and a
+#                          fresh check of the final copy finds nothing.
+# A failed check sends the work back through Punargathan (rework rounds, limit in
+# project_flows.yaml `max_rework_rounds`); after the limit a human decides.
+version: 1
+
+global:
+  # Plain phrases, matched case-insensitively anywhere in a post.
+  forbidden_claims:
+    - guaranteed cure
+    - guarantees a cure
+    - 100% cure
+    - permanent cure
+    - miracle
+    - no side effects
+    - risk-free
+    - instant results
+    - clinically proven to cure
+    - stop taking your medication
+    - replace your medicine
+  # Regular expressions (case-insensitive), each with the reason shown to the writer.
+  forbidden_patterns:
+    - pattern: '\b(cures?|cured|curing|reverses?|reversing|eliminates?)\s+(your\s+|type\s*[12]\s+)?(diabetes|cancer|hypertension|blood pressure|heart disease|thyroid|obesity|arthritis|asthma)\b'
+      reason: cure or reversal claim for a disease
+    - pattern: '\bguarantee(d|s)?\b'
+      reason: guaranteed outcome
+    - pattern: '\b100\s*%\s*(safe|effective|success|results?|recovery)\b'
+      reason: absolute safety or success claim
+    - pattern: '\b(stop|quit|skip)\s+(taking\s+)?(your\s+)?(medicines?|medications?|insulin|tablets|treatment)\b'
+      reason: tells patients to stop treatment
+    - pattern: '\b(best|no\.?\s*1|number\s+one|top)\s+(hospital|doctors?|surgeons?|diabetologists?|clinic|specialists?)\b'
+      reason: superiority claim (medical advertising may not claim to be the best)
+    - pattern: '\b(before\s+and\s+after|before/after)\b'
+      reason: before-and-after result claim
+  # Every post must have these fields filled in (not empty, not "unavailable").
+  post_fields: [headline, caption, call_to_action]
+  # Longest caption allowed (Instagram's limit is 2200 characters).
+  max_caption_chars: 2200
+  # A percentage or "1 in N" figure in a post must also appear in the research pack.
+  statistics_need_evidence: true
+  # Required disclaimers: each post must contain one of these (case and punctuation ignored).
+  required_disclaimers: []
+
+clients:
+  DEMO-HEALTHCARE-01:
+    name: Demo Healthcare Hospital
+    forbidden_claims:
+      - painless surgery
+      - zero risk
+    required_disclaimers:
+      - Consult your doctor for advice about your health.
+  DEMO-CLINIC-02:
+    # A second client. Its name must never appear in another client's content (Gopniya).
+    name: Sunrise Diabetes Clinic
+    aliases: [Sunrise Clinic]
+    forbidden_claims: []
+    required_disclaimers:
+      - For awareness only. Please consult a qualified doctor.

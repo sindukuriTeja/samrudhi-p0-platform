@@ -78,11 +78,11 @@ async def _ensure_agents(status: str) -> None:
         await s.commit()
 
 
-async def _new_project(name="Test project") -> str:
+async def _new_project(name="Test project", client_id="TEST") -> str:
     from backend.projects.common import new_project_id
     pid = new_project_id()
     async with async_session_maker() as s:
-        s.add(Project(id=pid, name=name, client_id="TEST", flow_key="documented_chain",
+        s.add(Project(id=pid, name=name, client_id=client_id, flow_key="documented_chain",
                       status="draft", created_by="tester"))
         await s.commit()
     return pid
@@ -107,7 +107,12 @@ def _fill(spec, key, count, writer_text):
         return {k: _fill(v, k, count, writer_text) for k, v in spec.items()}
     if isinstance(spec, list):
         n = count if key in ("posts", "pieces", "briefs", "specs") and count else 1
-        return [_fill(spec[0], key, count, writer_text) for _ in range(n)]
+        items = [_fill(spec[0], key, count, writer_text) for _ in range(n)]
+        if key == "posts":                      # a real writer gives every post its own caption
+            for i, item in enumerate(items, start=1):
+                if isinstance(item, dict) and "caption" in item:
+                    item["caption"] = f"Post {i}. {item['caption']}"
+        return items
     if spec == "bool":
         return True
     if key == "caption":
@@ -261,7 +266,11 @@ async def test_claim_check_sends_work_back_and_stops_at_round_limit(monkeypatch,
     assert len(rework) == 4                                       # 3 allowed rounds + the one that escalates
     assert rework[-1]["status"] == "needs_attention" and "Round limit" in rework[-1]["error"]
     assert [x["round"] for x in steps_of(st, "writing")] == [1, 2, 3, 4]
-    assert all(x["result"]["status"] == "block" for x in steps_of(st, "swasthya"))
+    shuddhi = steps_of(st, "shuddhi")                             # the code rules catch it first,
+    assert all(not x["passed"] for x in shuddhi)                  # whatever the model said
+    assert all("guaranteed cure" in " ".join(x["result"]["code_check"]["findings"]) for x in shuddhi)
+    assert shuddhi[0]["result"]["model_verdict"].startswith("pass")
+    assert not any(x["status"] == "completed" for x in steps_of(st, "swasthya"))
     assert st["project"]["status"] == "needs_attention"
     lekha_round2_task, ctx = seen["SAM-AG-082"][1]
     assert "guaranteed cure" in lekha_round2_task and ctx["revision_note"]
@@ -507,3 +516,90 @@ async def test_inactive_producer_is_not_assigned(monkeypatch, no_kick):
     assert asg["status"] == "needs_attention" and "SAM-AG-083 is not Active" in asg["error"]
     await _ensure_agents("active")
 
+
+# ---------------------------------------------------------------------------
+# safety rules in code
+# ---------------------------------------------------------------------------
+
+from backend.core import safety_rules as SR
+
+DISCLAIMER = "Consult your doctor for advice about your health."
+
+
+def _writer(seen, first, later):
+    """Lekha's caption: `first` in round 1, `later` from round 2 on."""
+    return lambda: first if len(seen.get("SAM-AG-082", [])) <= 1 else later
+
+
+async def _to_gate2(pid):
+    st = await run_until_blocked(pid)
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")   # Gate 1
+    return await run_until_blocked(pid)
+
+
+async def test_client_disclaimer_is_given_to_the_writer_and_enforced(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project(client_id="DEMO-HEALTHCARE-01")
+    seen = {}
+    stub(monkeypatch, seen=seen, writer_text=_writer(seen, "Walk daily.", f"Walk daily. {DISCLAIMER}"))
+    await R.start_project(pid, None, "tester")
+    st = await _to_gate2(pid)
+
+    task, ctx = seen["SAM-AG-082"][0]
+    assert DISCLAIMER in ctx["safety_rules"] and "Client safety rules" in task
+    sw = steps_of(st, "swasthya")
+    assert sw[0]["result"]["status"] == "block"
+    assert any("required disclaimer missing" in x for x in sw[0]["result"]["findings"])
+    assert sw[1]["result"]["status"] == "pass" and sw[1]["round"] == 2
+    assert st["pending_approval"]["agent_id"] == "SAM-AG-052"                 # Gate 2 after the fix
+
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")   # Gate 2
+    st = await run_until_blocked(pid)
+    pub = steps_of(st, "publishing")[-1]["result"]
+    assert pub["status"] == "scheduled"
+    assert st["project"]["status"] == "completed"
+
+
+async def test_code_rules_overrule_a_pass_from_the_model(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    seen = {}
+    stub(monkeypatch, seen=seen, writer_text=_writer(seen, "Visit the best hospital in town.", "Walk daily."))
+    await R.start_project(pid, None, "tester")
+    st = await _to_gate2(pid)
+    shuddhi = steps_of(st, "shuddhi")
+    assert shuddhi[0]["passed"] is False                                       # the model said pass
+    assert shuddhi[0]["result"]["model_verdict"].startswith("pass")
+    assert any(r.startswith("Code rule: post 1: superiority claim") for r in shuddhi[0]["result"]["reasons"])
+    assert shuddhi[1]["passed"] is True and shuddhi[1]["result"]["code_check"]["passed"] is True
+    assert st["pending_approval"]["agent_id"] == "SAM-AG-052"
+
+
+async def test_statistic_not_in_the_research_is_sent_back(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    seen = {}
+    stub(monkeypatch, seen=seen, writer_text=_writer(seen, "40% of adults do not know they have diabetes.",
+                                                     "Many adults do not know they have diabetes."))
+    await R.start_project(pid, None, "tester")
+    st = await _to_gate2(pid)
+    found = steps_of(st, "shuddhi")[0]["result"]["code_check"]["findings"]
+    assert 'post 1: figure "40%" is not in the research pack' in found
+    assert [x["round"] for x in steps_of(st, "writing")] == [1, 2]
+
+
+async def test_publishing_refuses_content_that_fails_the_final_check(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    pid = await _new_project()
+    stub(monkeypatch)
+    await R.start_project(pid, None, "tester")
+    st = await _to_gate2(pid)
+    # A rule added after Gate 2 (e.g. the client bans a phrase): the release guard checks again.
+    real = SR.rules_for
+    monkeypatch.setattr(SR, "rules_for", lambda cid: {**real(cid), "forbidden_claims": ["walk daily"]})
+    await R.decide(pid, st["pending_approval"]["request_id"], "approve", None, "tester")
+    st = await run_until_blocked(pid)
+    pub = steps_of(st, "publishing")[-1]
+    assert pub["status"] == "needs_attention" and pub["result"]["status"] == "refused"
+    assert "final safety check" in pub["error"] and "walk daily" in pub["error"]
+    assert st["project"]["status"] == "needs_attention"

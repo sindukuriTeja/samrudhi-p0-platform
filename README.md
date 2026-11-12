@@ -141,6 +141,29 @@ saved to the agent's register: initiatives, actions, workflow_instances (Daksh's
 from planning to delivered), work_packages, allocations, content_strategies, content_calendars,
 content_packages, qa_reviews, approval_workflows, client_communications, reports and briefs.
 
+Planning drives production: Sankalan's work packages, Samay's due dates, Kshamata's capacity
+check and Vitaran's assignments decide who produces what. Vitaran assigns a package only to
+agents that are Active and under `max_per_agent`; Pravartan turns the assignments into the
+production plan, and each producer (Lekha, Roop, Chitra) receives exactly its packages and must
+return one item per package. A producer with no packages is skipped.
+
+Safety rules in code (`config/safety_rules.yaml`, matched by `backend/core/safety_rules.py`; no
+model decides them). Global rules apply to every client; a client's block can add forbidden
+claims, patterns and required disclaimers, never remove a global one.
+- Lekha and Shuddhi are given the client's rules, but the code still checks the result.
+- Shuddhi: after the model's review, forbidden claims, forbidden patterns (cure claims, "best
+  hospital", guarantees, "stop your medication"…), other clients' names and figures that are not
+  in Anvesh's research pack force a send-back, even if the model said pass.
+- Gunvatta: every post has headline, caption and call to action filled in, no repeated
+  captions, captions within the length limit.
+- Swasthya: forbidden claims and patterns in every post and in the artwork text, and the
+  client's required disclaimer on every post.
+- Gopniya: personal data and the names of the other clients.
+- Prakash (release guard): schedules only if a signed-in human approved Gate 2 and a fresh
+  check of the final copy finds nothing; otherwise the project stops for a human.
+- Any failed check sends the work back through Punargathan; after `max_rework_rounds` (3) a
+  human decides. The rules for a client: `GET /api/projects/safety-rules?client_id=…`.
+
 New tables (Alembic migration `migrations/versions/0001_project_tables.py`):
 `projects`, `project_messages`, `project_steps`, `approval_decisions`;
 migration `0002_step_result_json.py` adds `project_steps.result_json`.

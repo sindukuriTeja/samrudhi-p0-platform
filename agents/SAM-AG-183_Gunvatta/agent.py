@@ -14,6 +14,7 @@ import uuid
 from agents.base import BaseAgent, AgentResult, register_agent
 from backend.core.llm import generate
 from backend.core.authority import authority_guard
+from backend.core import safety_rules
 from backend.core.message_bus import BusEnvelope, bus
 
 
@@ -117,21 +118,34 @@ HARD RULES — NEVER VIOLATE
     # ------------------------------------------------------------------
 
     @authority_guard("gov.evaluate_output")
-    def evaluate_output(self, content: str, producer_agent: str, required_elements: list = None) -> dict:
-        """Evaluate an output (independence enforced)."""
+    def evaluate_output(self, content: str, producer_agent: str, required_elements: list = None,
+                        posts: list = None, required_fields: list = None, max_chars: int = None) -> dict:
+        """Evaluate an output (independence enforced), in code.
+
+        posts + required_fields + max_chars: every post must have each field filled in
+        (not empty or "unavailable"), no caption may repeat another, and no caption may be
+        longer than max_chars.
+        """
         if producer_agent == self.canonical_id:
             raise ValueError("Independence rule: Gunvatta cannot evaluate its own output.")
         text = (content or "").strip()
         missing = [k for k in (required_elements or []) if k.lower() not in text.lower()]
         defects = []
-        if not text:
+        if not text and not posts:
             defects.append("EMPTY_OUTPUT")
         if missing:
             defects.append("MISSING_ELEMENTS")
+        if posts is not None:
+            if not posts:
+                defects.append("no posts were produced")
+            rules = {"post_fields": list(required_fields or []), "max_caption_chars": max_chars}
+            defects += [safety_rules.describe(f) for f in safety_rules.screen(
+                posts, rules, only={safety_rules.MISSING_FIELD, safety_rules.TOO_LONG})["findings"]]
         return {
             "evaluation_id": f"EVL-{uuid.uuid4().hex[:6].upper()}",
             "producer_agent": producer_agent,
             "missing_elements": missing,
+            "posts_checked": len(posts or []),
             "defects": defects,
             "passed": not defects,
             "status": "evaluated",

@@ -15,6 +15,7 @@ import uuid
 from agents.base import BaseAgent, AgentResult, register_agent
 from backend.core.llm import generate
 from backend.core.authority import authority_guard
+from backend.core import safety_rules
 from backend.core.message_bus import BusEnvelope, bus
 
 
@@ -129,16 +130,39 @@ HARD RULES — NEVER VIOLATE
     # ------------------------------------------------------------------
 
     @authority_guard("gov.screen_claims")
-    def screen_claims(self, content: str, extra_forbidden: list = None) -> dict:
-        """Flag high-risk healthcare claims."""
-        text = (content or "").lower()
-        patterns = list(self.HIGH_RISK_CLAIMS) + [p.lower() for p in (extra_forbidden or [])]
-        flags = [p for p in patterns if p in text]
+    def screen_claims(self, content: str, extra_forbidden: list = None, patterns: list = None,
+                      required_disclaimers: list = None, posts: list = None) -> dict:
+        """Flag high-risk healthcare claims, in code (config/safety_rules.yaml).
+
+        content               free text (for example the artwork's text on image)
+        extra_forbidden       the client's own forbidden phrases, added to HIGH_RISK_CLAIMS
+        patterns              forbidden regular expressions [{pattern, reason}]
+        required_disclaimers  each post must contain one of these
+        posts                 the posts, checked one by one (findings name the post)
+        """
+        claims = list(self.HIGH_RISK_CLAIMS) + [p for p in (extra_forbidden or []) if p]
+        rules = {"forbidden_claims": claims, "forbidden_patterns": list(patterns or []),
+                 "required_disclaimers": list(required_disclaimers or [])}
+        kinds = {safety_rules.FORBIDDEN_CLAIM, safety_rules.FORBIDDEN_PATTERN, safety_rules.MISSING_DISCLAIMER}
+        findings = []
+        if posts:
+            findings += safety_rules.screen(posts, rules, only=kinds)["findings"]
+        if content and content.strip():
+            # Free text: claims only when there are posts (the disclaimer is required per post).
+            only = kinds if not posts else kinds - {safety_rules.MISSING_DISCLAIMER}
+            for f in safety_rules.screen(None, rules, content=content, only=only)["findings"]:
+                if f not in findings:
+                    findings.append(f)
+        text = ((content or "") + "\n" + "\n".join(safety_rules.post_text(x) for x in (posts or []))).lower()
+        flags = [p.lower() for p in claims if p.lower() in text]
+        flags += [f["detail"] for f in findings if f["rule"] != safety_rules.FORBIDDEN_CLAIM and f["detail"] not in flags]
         return {
             "screening_id": f"SCR-{uuid.uuid4().hex[:6].upper()}",
             "flags": flags,
-            "passed": not flags,
-            "status": "pass" if not flags else "block",
+            "findings": [safety_rules.describe(f) for f in findings],
+            "posts_checked": len(posts or []),
+            "passed": not findings,
+            "status": "pass" if not findings else "block",
             "screened_at": _now(),
         }
 

@@ -27,6 +27,7 @@ from backend.core.message_bus import BusEnvelope, bus
 from backend.database import async_session_maker
 from backend.models import Agent, Approval, ExecutionLog
 from backend.models.projects import ApprovalDecision, Project, ProjectMessage, ProjectStep
+from backend.core import safety_rules
 from backend.projects import dispatch as dispatcher
 from backend.projects import registers
 from backend.projects import schema
@@ -190,6 +191,32 @@ async def _production_plan(s, pid: str, flow: dict) -> list[dict]:
     return plan
 
 
+async def _gate_decision(s, pid: str, key: str) -> dict:
+    """The human decision on the latest gate step `key` ({"decision": None} if none yet)."""
+    st = await _latest(s, pid, key, completed_only=False)
+    if st is None or not st.approval_id:
+        return {"decision": None, "decided_by": None}
+    dec = (await s.execute(select(ApprovalDecision).where(
+        ApprovalDecision.request_id == st.approval_id))).scalars().first()
+    if dec is None:
+        return {"request_id": st.approval_id, "decision": None, "decided_by": None}
+    return {"request_id": st.approval_id, "decision": dec.decision, "decided_by": dec.decided_by,
+            "decided_at": dec.decided_at.isoformat() if dec.decided_at else None}
+
+
+async def _safety_findings(s, p: Project, posts_from: str = "writing", evidence_from: str | None = "research",
+                           only: set | None = None) -> tuple[list[dict], int]:
+    """Check the latest posts against the client's safety rules (config/safety_rules.yaml)."""
+    src = await _latest(s, p.id, posts_from)
+    posts = ((src.result_json or {}) if src else {}).get("posts") or []
+    evidence = None
+    if evidence_from:
+        ev = await _latest(s, p.id, evidence_from)
+        evidence = schema.flatten_text(schema.public(ev.result_json)) if ev else ""
+    res = safety_rules.screen(posts, safety_rules.rules_for(p.client_id), evidence=evidence, only=only)
+    return res["findings"], res["posts_checked"]
+
+
 def _passed(st: ProjectStep | None) -> bool:
     return bool(st is not None and st.status == "completed" and (st.result_json or {}).get("_passed", True))
 
@@ -225,6 +252,14 @@ async def _resolve(value, s, p: Project, step: ProjectStep, flow: dict):
         if name.startswith("data:"):
             return data
         return schema.flatten_text(data) if data else await _output(s, p.id, key)
+    if name.startswith("safety:"):
+        return safety_rules.rules_for(p.client_id).get(name[len("safety:"):])
+    if name.startswith("gate:"):
+        return await _gate_decision(s, p.id, name[len("gate:"):])
+    if name.startswith("safety_check:"):
+        findings, n = await _safety_findings(s, p, name[len("safety_check:"):])
+        return {"passed": not findings and n > 0, "posts_checked": n,
+                "findings": [safety_rules.describe(f) for f in findings] or ([] if n else ["there are no posts"])}
     if name == "project_id":
         return p.id
     if name == "project_name":
@@ -278,7 +313,8 @@ async def _decide_pass(d: dict, result: dict) -> bool:
 
 
 def _fail_reasons(result: dict) -> list[str]:
-    for k in ("flags", "findings", "missing_checks", "missing", "missing_evidence", "defects", "denied", "unassigned"):
+    for k in ("findings", "flags", "reasons", "missing_checks", "missing", "missing_evidence", "defects", "denied",
+              "unassigned"):
         v = result.get(k)
         if v:
             return [json.dumps(x) if isinstance(x, dict) else str(x) for x in v]
@@ -476,6 +512,12 @@ class ProjectRunner:
             "step": d.get("tag"), "round": step.round,
             "human_instructions": humans, "handed_over": handed_over,
         }
+        if d.get("safety_rules"):
+            rules_text = safety_rules.prompt_text(safety_rules.rules_for(p.client_id))
+            if rules_text:
+                context["safety_rules"] = rules_text
+                parts.insert(1, "Client safety rules (checked by code after you; breaking one sends the work "
+                                "back): " + rules_text)
         packages = (step.result_json or {}).get("_packages")
         if packages:
             context["work_packages"] = packages
@@ -574,6 +616,7 @@ class ProjectRunner:
                     passed = verdict not in ("send_back", "sendback", "fail", "reject")
                     if not passed:
                         structured["reasons"] = structured.get("reasons") or "No reason given."
+                structured, passed = await self._enforce_code_rules(s, p, d, structured, passed)
                 return await self._complete(s, p, st, d, flow, structured,
                                             json.dumps(structured, ensure_ascii=False), passed=passed)
             if d.get("verdict"):
@@ -586,7 +629,36 @@ class ProjectRunner:
                     if not m:
                         output += ("\n\n(No explicit verdict was given, so this check is recorded as a pass. "
                                    "The human gates still review the work.)")
+                structured, passed = await self._enforce_code_rules(s, p, d, structured, passed)
+                code = (structured or {}).get("code_check") or {}
+                if code.get("findings"):
+                    output += "\n\nCode rules found: " + "; ".join(code["findings"])
             return await self._complete(s, p, st, d, flow, structured, output, passed=passed)
+
+    async def _enforce_code_rules(self, s, p: Project, d: dict, structured: dict | None,
+                                  passed: bool) -> tuple[dict | None, bool]:
+        """Safety rules decided in code: a rule finding forces a send-back, whatever the model said.
+
+        The model can be stricter than the code (its own send-back stands), never looser.
+        """
+        cr = d.get("code_rules")
+        if not cr:
+            return structured, passed
+        findings, n = await _safety_findings(s, p, cr.get("posts_from", "writing"), cr.get("evidence_from"),
+                                             set(cr.get("rules") or []) or None)
+        out = dict(structured or {})
+        out["code_check"] = {"passed": not findings, "posts_checked": n,
+                             "findings": [safety_rules.describe(f) for f in findings]}
+        if not findings:
+            return out, passed
+        reasons = ["Code rule: " + safety_rules.describe(f) for f in findings]
+        model = out.get("reasons")
+        if not passed and model:
+            reasons += [f"Reviewer: {x}" for x in (model if isinstance(model, list) else [model])]
+        if passed:
+            out["model_verdict"] = "pass (overruled by the code rules)"
+        out["verdict"], out["reasons"] = "send_back", reasons
+        return out, False
 
     async def _complete(self, s, p: Project, st: ProjectStep, d: dict, flow: dict,
                         structured: dict | None, raw_text: str, passed: bool) -> bool:
