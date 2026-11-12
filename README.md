@@ -128,6 +128,29 @@ Health check: `http://localhost:8000/api/health`
 ```bash
 celery -A workers.celery_app worker --loglevel=info
 ```
+On Windows add `--pool=solo`.
+
+## Control Room (web UI + project flow)
+
+One command runs everything (Redis via Docker if it is not running, migrations,
+agent-registry seed, Celery worker, API + UI):
+```bash
+python -m scripts.run_all
+```
+- New UI: `http://localhost:8000/` — Projects (new project, start, live run, approvals), History, Agents
+- Previous UI: `http://localhost:8000/legacy/` (agent detail, activation gate, lifecycle transitions)
+- API docs: `http://localhost:8000/docs`
+
+A project runs the flow in `config/project_flows.yaml` (Smriti → Anvesh → Yojana →
+Lekha → Roop → Shuddhi → Pariksha, mapped onto Daksh's delivery stages). The
+runner (`backend/projects/`) only dispatches the existing `run_agent_task`
+Celery task; it refuses agents that are not Active, checks each step's
+permission with the authority guard, and asks a signed-in human for approval
+after the compliance check and the final review. Without Redis the same task
+runs in a local process and the UI polls every 5 seconds.
+
+New tables (Alembic migration `migrations/versions/0001_project_tables.py`):
+`projects`, `project_messages`, `project_steps`, `approval_decisions`.
 
 ## Adding a new agent
 

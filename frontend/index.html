@@ -123,6 +123,7 @@
 <header>
   <div class="bar">
     <div class="brand">Samrudhi Control Room <small>P0 platform</small></div>
+    <a class="btn" href="/" id="new-ui-link" hidden>← New Control Room</a>
     <div class="health" id="health"><span class="pill"><span class="dot"></span>Checking backend…</span></div>
     <div class="user" id="user"></div>
   </div>
@@ -186,7 +187,8 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const API = (new URLSearchParams(location.search).get('api')) || 'http://localhost:8000';
+const API = (new URLSearchParams(location.search).get('api')) ||
+  (location.protocol.startsWith('http') && location.port !== '5173' ? location.origin : 'http://localhost:8000');
 const STATES = ['proposed','registered','configured','evaluated','approved','active','monitored','restricted','retired'];
 const STAGE_LABEL = {
   'P0-1A': 'Stage 1A · Core', 'P0-1B': 'Stage 1B · Tech services', 'P0-1C': 'Stage 1C · Assurance',
@@ -441,9 +443,14 @@ function closeDrawer() {
 $('#scrim').onclick = closeDrawer;
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && openId) closeDrawer(); });
 
+if (location.pathname.startsWith('/legacy')) { const l = document.getElementById('new-ui-link'); l.hidden = false; l.style.textDecoration = 'none'; l.style.color = 'inherit'; }
 renderUser();
 loadHealth();
-loadAgents();
+loadAgents().then(() => {
+  // /legacy/?agent=SAM-AG-001 opens that agent's detail page (used by the new Agents screen)
+  const want = new URLSearchParams(location.search).get('agent');
+  if (want) openDrawer(want);
+});
 setInterval(loadHealth, 15000);
 </script>
 </body>

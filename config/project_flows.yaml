@@ -1,0 +1,122 @@
+# Project flows used by the Control Room project runner.
+#
+# The runner contains no agent logic: it reads a flow from this file and
+# dispatches each step to the existing agent through the existing Celery task
+# (workers.tasks.run_agent_task), after checking the agent is Active and that
+# the step's permission passes the authority guard.
+#
+# Stage names follow Daksh's delivery workflow state machine
+# (SAM-AG-002 get_workflow_state: planning -> allocated -> executing -> quality
+# -> approved -> delivered). Agents and actions come from each agent's own
+# mission and AUTHORITY matrix (agents/<id>_<Name>/agent.py).
+#
+# Step fields
+#   key             unique step key inside the flow
+#   agent           canonical_id of the agent that runs the step
+#   action          passed to agent.run(action=...)
+#   permission      authority-guard permission checked before dispatch
+#   tag             short task tag shown on the conversation card
+#   responsibility  one-line description shown in the "Agents on this project" panel
+#   instruction     task text sent to the agent
+#   deliverable     (optional) what this step delivers, listed in History
+#   approval        (optional) a human decision is required after the step
+#     question        one-line question shown on the approval card
+#     revise_step     step that is re-run (new round) on "approve with changes" or Retry
+#     revise_permission  permission checked for that revision round
+
+default_flow: content_production
+
+flows:
+  content_production:
+    name: Content production
+    steps:
+      - key: brief
+        stage: planning
+        agent: SAM-AG-049        # Smriti - client context and content knowledge
+        action: capture
+        permission: crt.capture_context
+        tag: Client brief
+        responsibility: Reads the client brief and brand rules
+        instruction: >-
+          Capture the client brief for this project: brand tone, audience, and
+          any rules the content must follow. If something is not known, say it
+          is unavailable. Keep it under 120 words.
+
+      - key: research
+        stage: planning
+        agent: SAM-AG-081        # Anvesh - healthcare research
+        action: research
+        permission: crt.research_topic
+        tag: Research
+        responsibility: Researches the topic and checks sources
+        instruction: >-
+          Research the topic of this project. List the key facts the content
+          can rely on and the sources behind them. Leave out anything that
+          cannot be verified. Keep it under 150 words.
+
+      - key: direction
+        stage: planning
+        agent: SAM-AG-059        # Yojana - campaign strategy
+        action: plan
+        permission: crt.define_campaign
+        tag: Content direction
+        responsibility: Sets the content direction
+        instruction: >-
+          Using the brief and the research, set the content direction: what
+          pieces to make, the message of each, the voice, and one clear call
+          to action per piece. Keep it under 150 words.
+
+      - key: writing
+        stage: executing
+        agent: SAM-AG-082        # Lekha - healthcare copywriting
+        action: write
+        permission: crt.write_copy
+        tag: Writing
+        responsibility: Writes the copy
+        deliverable: Copy
+        instruction: >-
+          Write the copy for every piece in the content direction. Use only
+          facts from the research. Do not give medical advice. Keep each piece short.
+
+      - key: design_brief
+        stage: executing
+        agent: SAM-AG-078        # Roop - creative briefs
+        action: create
+        permission: crt.create_creative_brief
+        tag: Design brief
+        responsibility: Writes the design brief
+        deliverable: Design brief
+        instruction: >-
+          Write a design brief for each piece of copy: layout, visual idea,
+          and the text that goes on the image. Keep it under 150 words.
+
+      - key: compliance
+        stage: quality
+        agent: SAM-AG-080        # Shuddhi - compliance and quality
+        action: check
+        permission: crt.check_compliance
+        tag: Compliance check
+        responsibility: Checks medical claims and compliance
+        instruction: >-
+          Check the copy for healthcare compliance and brand rules. Name every
+          claim that cannot be supported and say what should change. Keep it under 120 words.
+        approval:
+          question: Shuddhi has checked the copy. Can the team continue with it?
+          revise_step: writing
+          revise_permission: crt.revise_copy
+
+      - key: review
+        stage: quality
+        agent: SAM-AG-094        # Pariksha - content review and fact check
+        action: review
+        permission: crt.review_content
+        tag: Final review
+        responsibility: Fact-checks and reviews the final work
+        deliverable: Review report
+        instruction: >-
+          Review the final copy and design briefs for accuracy, fact-check
+          them against the research, and list anything that still needs work. Keep it under 120 words.
+        approval:
+          question: Pariksha has reviewed the final work. Approve it as ready to publish?
+          revise_step: writing
+          revise_permission: crt.revise_copy
