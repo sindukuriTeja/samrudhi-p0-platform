@@ -110,20 +110,18 @@ flows:
           sign-off before anything is published. Use only what is known; mark the rest
           unavailable. Keep it under 120 words.
       - key: client_context
-        output: {brand_voice: str, services: [str], audience: str, forbidden_claims: [str], unavailable: [str]}
         block: 3
         agent: SAM-AG-049                # Smriti - Client Knowledge
-        mode: think
-        action: capture
-        permission: crt.capture_context
+        mode: tool
         tag: Client context
         responsibility: Loads the approved client facts and rules
         gives: Client context pack to Shruti
-        inputs: [client_expectations]
-        instruction: >-
-          List the approved client facts for this project: brand voice, services, audience and
-          forbidden claims. Do not invent facts; anything not on record is unavailable. Keep it
-          under 120 words.
+        # From the client knowledge store (client_profiles), approved by a person; never written by
+        # the model. No approved profile: the project stops here until a person adds and approves it.
+        method: load_client_context
+        args: {client_id: $client_id, profile: $client_profile, rules: $client_rules}
+        pass_if: {status: loaded}
+        on_fail: block
       - key: brief
         output: {objective: str, audience: str, deliverables: [str], deadline: str, limits: [str]}
         block: 3
@@ -245,11 +243,13 @@ flows:
           Set the quality bar for this work: what good looks like, the brand rules that must hold
           and what the research must answer. Keep it under 100 words.
       - key: research
-        output: {facts: [{fact: str, source: str, verified: bool}], excluded: [str]}
-        override: {"facts[].verified": false}     # set in code: no live source connector exists yet
+        output: {facts: [{fact: str, source_id: str, quote: str}], excluded: [str]}
+        library: true                    # the code gives Anvesh the approved passages that match
+        verify_facts: true               # and checks every fact against them (verified is set by code)
         note: >-
-          No live source connector is set up, so every fact below is marked not verified. The
-          organisations named are where the agent says the fact comes from; check them before publishing.
+          Facts are checked in code against the approved source library: a fact is verified only
+          when its quote is found in the cited approved source and its figures appear in the quote.
+          Links come from the library, not from the model.
         block: 5
         agent: SAM-AG-081                # Anvesh - Healthcare Content Research
         mode: think
@@ -260,9 +260,9 @@ flows:
         gives: Research pack to Disha
         inputs: [brief, creative_request]
         instruction: >-
-          List the key facts the content can use. You cannot browse the web: name the organisation
-          you rely on for each fact and mark every fact "not verified against a live source". Do not
-          invent quotes or numbers. Keep it under 150 words.
+          List the key facts the content can use, only from the approved sources you are given.
+          Do not invent quotes, numbers or sources. Put anything you cannot support in excluded.
+          Keep it under 150 words.
       - key: direction
         output: {themes: [str], tone: str, pieces: [{topic: str, key_message: str, call_to_action: str}]}
         count: {field: pieces, scope: social_posts}
@@ -333,6 +333,7 @@ flows:
         safety_rules: true               # the client's rules are given to the writer (code still checks them)
         instruction: >-
           Write the copy for every post in the calendar: caption, headline and one call to action.
+          Use only research facts marked verified; never use a number from an unverified fact.
           Use only the research facts. No medical advice, no cure claims. Write only the posts.
       - key: design_brief
         output: {briefs: [{post: str, layout: str, visual_idea: str, text_on_image: str}]}

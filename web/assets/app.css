@@ -277,3 +277,16 @@ dialog p { margin: 0; }
 }
 
 .acard .saved { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+
+/* Knowledge page */
+.kn-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; align-items: start; }
+.kn-card { padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
+.kn-card h2 { margin: 0; font-size: 17px; }
+.kn-card textarea { min-height: 64px; }
+.kn-add { display: flex; flex-direction: column; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.kn-rules { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.kn-src { display: flex; flex-direction: column; gap: 6px; }
+.kn-src a { color: var(--sky); overflow-wrap: anywhere; }
+.kn-text { white-space: pre-wrap; max-height: 320px; overflow: auto; background: #141414; border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; font-size: 12.5px; margin: 0; }
+@media (max-width: 1100px) { .kn-grid { grid-template-columns: minmax(0, 1fr); } }

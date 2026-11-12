@@ -28,6 +28,8 @@ from backend.database import async_session_maker
 from backend.models import Agent, Approval, ExecutionLog
 from backend.models.projects import ApprovalDecision, Project, ProjectMessage, ProjectStep
 from backend.core import safety_rules
+from backend.core import knowledge as kn
+from backend.models.knowledge import ClientProfile, KnowledgeSource
 from backend.projects import dispatch as dispatcher
 from backend.projects import registers
 from backend.projects import schema
@@ -204,6 +206,38 @@ async def _gate_decision(s, pid: str, key: str) -> dict:
             "decided_at": dec.decided_at.isoformat() if dec.decided_at else None}
 
 
+def profile_out(cp: ClientProfile) -> dict:
+    return {"client_id": cp.client_id, "name": cp.name, "brand_voice": cp.brand_voice, "audience": cp.audience,
+            "services": list(cp.services or []), "locations": list(cp.locations or []),
+            "key_messages": list(cp.key_messages or []), "status": cp.status, "version": cp.version,
+            "updated_by": cp.updated_by, "updated_at": cp.updated_at.isoformat() if cp.updated_at else None,
+            "approved_by": cp.approved_by, "approved_at": cp.approved_at.isoformat() if cp.approved_at else None}
+
+
+async def _client_profile(s, client_id: str) -> dict | None:
+    cp = await s.get(ClientProfile, client_id)
+    return profile_out(cp) if cp else None
+
+
+async def _approved_sources(s, client_id: str) -> list[dict]:
+    """Approved sources this client may use: its own and the shared library."""
+    rows = (await s.execute(select(KnowledgeSource).where(
+        KnowledgeSource.status == "approved",
+        (KnowledgeSource.client_id == client_id) | (KnowledgeSource.client_id.is_(None))))).scalars().all()
+    return [{"id": r.id, "title": r.title, "publisher": r.publisher, "url": r.url,
+             "topics": list(r.topics or []), "text": r.text} for r in rows]
+
+
+async def _library_query(s, p: Project) -> str:
+    """What the research is about: the project, the human instructions, the brief and the creative request."""
+    parts = [p.name] + await _human_texts(s, p.id)
+    for key in ("brief", "creative_request", "client_expectations"):
+        st = await _latest(s, p.id, key)
+        if st is not None:
+            parts.append(schema.flatten_text(schema.public(st.result_json)))
+    return " ".join(parts)
+
+
 async def _safety_findings(s, p: Project, posts_from: str = "writing", evidence_from: str | None = "research",
                            only: set | None = None) -> tuple[list[dict], int]:
     """Check the latest posts against the client's safety rules (config/safety_rules.yaml)."""
@@ -212,7 +246,14 @@ async def _safety_findings(s, p: Project, posts_from: str = "writing", evidence_
     evidence = None
     if evidence_from:
         ev = await _latest(s, p.id, evidence_from)
-        evidence = schema.flatten_text(schema.public(ev.result_json)) if ev else ""
+        data = schema.public(ev.result_json) if ev else {}
+        facts = data.get("facts") if isinstance(data, dict) else None
+        if isinstance(facts, list) and any(isinstance(f, dict) and "verified" in f for f in facts):
+            # only facts verified against an approved source count as evidence
+            evidence = "\n".join(f"{f.get('fact', '')} {f.get('quote', '')}" for f in facts
+                                  if isinstance(f, dict) and f.get("verified"))
+        else:
+            evidence = schema.flatten_text(data) if data else ""
     res = safety_rules.screen(posts, safety_rules.rules_for(p.client_id), evidence=evidence, only=only)
     return res["findings"], res["posts_checked"]
 
@@ -252,6 +293,10 @@ async def _resolve(value, s, p: Project, step: ProjectStep, flow: dict):
         if name.startswith("data:"):
             return data
         return schema.flatten_text(data) if data else await _output(s, p.id, key)
+    if name == "client_profile":
+        return await _client_profile(s, p.client_id)
+    if name == "client_rules":
+        return safety_rules.rules_for(p.client_id)
     if name.startswith("safety:"):
         return safety_rules.rules_for(p.client_id).get(name[len("safety:"):])
     if name.startswith("gate:"):
@@ -512,6 +557,17 @@ class ProjectRunner:
             "step": d.get("tag"), "round": step.round,
             "human_instructions": humans, "handed_over": handed_over,
         }
+        if d.get("library"):
+            lib = kn.retrieve(await _library_query(s, p), await _approved_sources(s, p.client_id))
+            context["source_library"] = lib
+            if lib:
+                parts.insert(1, "Use ONLY the approved sources in source_library. For every fact give its "
+                                "source_id (for example " + lib[0]["passages"][0]["passage_id"] + ") and copy "
+                                "the exact sentence you rely on into quote. A fact whose quote is not in that "
+                                "source is marked not verified by code.")
+            else:
+                parts.insert(1, "No approved source in the library matches this project, so every fact will be "
+                                "marked not verified. Write source_id \"none\" and quote \"unavailable\".")
         if d.get("safety_rules"):
             rules_text = safety_rules.prompt_text(safety_rules.rules_for(p.client_id))
             if rules_text:
@@ -611,6 +667,8 @@ class ProjectRunner:
                     return await self._block(s, p, st, "The answer did not match the required structure after "
                                                        "two tries: " + "; ".join(errs[:4]))
                 structured = schema.apply_overrides(schema.coerce(data, d["output"]), d.get("override"))
+                if d.get("verify_facts"):
+                    structured = await self._verify_facts(s, p, st, structured)
                 if d.get("verdict"):
                     verdict = str(structured.get("verdict", "pass")).lower().replace(" ", "_").replace("-", "_")
                     passed = verdict not in ("send_back", "sendback", "fail", "reject")
@@ -634,6 +692,24 @@ class ProjectRunner:
                 if code.get("findings"):
                     output += "\n\nCode rules found: " + "; ".join(code["findings"])
             return await self._complete(s, p, st, d, flow, structured, output, passed=passed)
+
+    async def _verify_facts(self, s, p: Project, st: ProjectStep, structured: dict) -> dict:
+        """Anvesh's facts are checked in code against the approved library (his own guarded tool)."""
+        from agents.base import get_agent_module
+        sources = await _approved_sources(s, p.client_id)
+        library = {x["id"]: x for x in sources}
+        try:
+            res = get_agent_module(st.agent_id).verify_facts(facts=structured.get("facts") or [], library=library)
+        except Exception as e:  # never let a checking problem mark anything verified
+            log.exception("Fact verification failed for %s", p.id)
+            res = {"facts": [{**(f if isinstance(f, dict) else {"fact": str(f)}), "verified": False,
+                              "reason": f"verification failed: {e}"} for f in structured.get("facts") or []],
+                   "verified": 0}
+        out = dict(structured)
+        out["facts"] = res["facts"]
+        out["verified_count"] = res.get("verified", 0)
+        out["sources_available"] = len(library)
+        return out
 
     async def _enforce_code_rules(self, s, p: Project, d: dict, structured: dict | None,
                                   passed: bool) -> tuple[dict | None, bool]:

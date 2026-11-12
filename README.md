@@ -164,6 +164,27 @@ claims, patterns and required disclaimers, never remove a global one.
 - Any failed check sends the work back through Punargathan; after `max_rework_rounds` (3) a
   human decides. The rules for a client: `GET /api/projects/safety-rules?client_id=…`.
 
+Real information (Knowledge page, `#/knowledge`; settings in `config/knowledge.yaml`):
+- Client knowledge store (`client_profiles`): brand voice, audience, services, locations, key
+  messages. Smriti's step is code: it loads the approved profile and the client's rules. A client
+  with no approved profile stops at Smriti with the reason; nothing is invented.
+- Source library (`knowledge_sources`): a signed-in person adds a page (fetched from an allowed
+  https health site, or pasted text). Fetching refuses other sites, private and local addresses,
+  unsafe redirects, non-web files and pages over 2 MB. Agents never fetch or browse.
+- Four-eyes rule in code: a profile edit or a new source is a draft until a *different*
+  signed-in person approves it (roles in `config/knowledge.yaml`); any edit resets the approval.
+- Anvesh receives only the approved passages that match the project and must cite a
+  `source_id` and an exact `quote` per fact. His guarded `verify_facts` tool marks a fact
+  verified only if the quote is in that approved source and the fact's figures are in the quote;
+  title, publisher and link come from the library. Shuddhi accepts a figure in a post only if
+  it is in a verified fact.
+- Finding new client hospitals (Khoj, Sampark, Lakshit) is Phase 6 Sales work and not built.
+
+API: `GET/PUT /api/knowledge/clients/{id}`, `POST /api/knowledge/clients/{id}/approve`,
+`GET/POST /api/knowledge/sources`, `POST /api/knowledge/sources/fetch`,
+`POST /api/knowledge/sources/{id}/approve|retire`, `GET /api/knowledge/search?q=`.
+Migration `0003_knowledge.py` adds the two tables.
+
 New tables (Alembic migration `migrations/versions/0001_project_tables.py`):
 `projects`, `project_messages`, `project_steps`, `approval_decisions`;
 migration `0002_step_result_json.py` adds `project_steps.result_json`.

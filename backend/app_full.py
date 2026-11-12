@@ -19,10 +19,12 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.main import app
 from backend.models import projects as _project_models  # noqa: F401  (registers the new tables)
+from backend.models import knowledge as _knowledge_models  # noqa: F401
 from backend.core.message_bus import bus
 from backend.projects.runner import runner
 from backend.routes import projects as projects_routes
 from backend.routes import workforce as workforce_routes
+from backend.routes import knowledge as knowledge_routes
 from config.settings import get_settings
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,6 +33,7 @@ LEGACY_DIR = os.path.join(ROOT, "frontend")
 
 app.include_router(projects_routes.router)
 app.include_router(workforce_routes.router)
+app.include_router(knowledge_routes.router)
 
 
 async def _redis_reconnect_loop() -> None:

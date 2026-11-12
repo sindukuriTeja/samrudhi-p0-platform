@@ -78,10 +78,17 @@ async def _ensure_agents(status: str) -> None:
         await s.commit()
 
 
-async def _new_project(name="Test project", client_id="TEST") -> str:
+async def _new_project(name="Test project", client_id="TEST", profile=True) -> str:
+    """A draft project; by default its client has an approved profile in the knowledge store."""
     from backend.projects.common import new_project_id
+    from backend.models.knowledge import ClientProfile
     pid = new_project_id()
     async with async_session_maker() as s:
+        if profile and await s.get(ClientProfile, client_id) is None:
+            s.add(ClientProfile(client_id=client_id, name="Test Hospital", brand_voice="Calm and clear",
+                                audience="Adults 35-60", services=["Diabetes clinic"], locations=["Hyderabad"],
+                                key_messages=["Early checks help"], status="approved", version=1,
+                                updated_by="editor", approved_by="approver"))
         s.add(Project(id=pid, name=name, client_id=client_id, flow_key="documented_chain",
                       status="draft", created_by="tester"))
         await s.commit()
@@ -121,7 +128,7 @@ def _fill(spec, key, count, writer_text):
 
 
 def stub(monkeypatch, writer_text="Eat well and walk daily. Ask your doctor about a sugar check.",
-         verdicts=None, seen=None, broken=None):
+         verdicts=None, seen=None, broken=None, answers=None):
     """Replace model steps with schema-valid JSON.
 
     verdicts: {agent: ["send_back: reasons", ...]} consumed in order (default pass).
@@ -142,6 +149,8 @@ def stub(monkeypatch, writer_text="Eat well and walk daily. Ask your doctor abou
         m = re.search(r"must contain exactly (\d+) items", task)
         text = writer_text() if callable(writer_text) else writer_text
         data = _fill(d["output"], "", int(m.group(1)) if m else 0, text)
+        if answers and agent in answers:                 # a specific answer for this agent
+            data = json.loads(json.dumps(answers[agent]))
         if d.get("verdict"):
             queue = verdicts.get(agent) or []
             v = queue.pop(0) if queue else "pass"
@@ -434,8 +443,10 @@ async def test_research_is_never_marked_verified_without_a_source(monkeypatch, n
     st = await run_until_blocked(pid)
     research = steps_of(st, "research")[0]["result"]
     assert research["facts"] and all(f["verified"] is False for f in research["facts"])
+    assert research["facts"][0]["reason"] == "not from an approved source in the library"
+    assert research["sources_available"] == 0
     msg = next(m for m in st["messages"] if m["step_tag"] == "Research")
-    assert msg["text"].startswith("No live source connector")
+    assert msg["text"].startswith("Facts are checked in code against the approved source library")
 
 
 # ---------------------------------------------------------------------------
@@ -603,3 +614,103 @@ async def test_publishing_refuses_content_that_fails_the_final_check(monkeypatch
     assert pub["status"] == "needs_attention" and pub["result"]["status"] == "refused"
     assert "final safety check" in pub["error"] and "walk daily" in pub["error"]
     assert st["project"]["status"] == "needs_attention"
+
+
+# ---------------------------------------------------------------------------
+# real information: client knowledge store and source library
+# ---------------------------------------------------------------------------
+
+from backend.models.knowledge import ClientProfile, KnowledgeSource
+
+SOURCE_TEXT = ("About 1 in 10 adults worldwide lives with diabetes. Many people with type 2 diabetes have no "
+               "symptoms for years, so a simple blood sugar test is the only way to know. Common signs include "
+               "feeling very thirsty, passing urine often, tiredness and blurred vision.")
+
+
+async def _add_source(client_id, status, text=SOURCE_TEXT, title="Diabetes fact sheet"):
+    import uuid as _uuid
+    sid = f"SRC-{_uuid.uuid4().hex[:6].upper()}"
+    async with async_session_maker() as s:
+        s.add(KnowledgeSource(id=sid, client_id=client_id, title=title, publisher="WHO",
+                              url="https://www.who.int/news-room/fact-sheets/detail/diabetes", topics=["diabetes"],
+                              text=text, content_hash=_uuid.uuid4().hex[:16], status=status,
+                              added_by="divya", approved_by="satya_human" if status == "approved" else None))
+        await s.commit()
+    return sid
+
+
+async def test_client_without_an_approved_profile_stops_at_smriti(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    seen = {}
+    stub(monkeypatch, seen=seen)
+    pid = await _new_project(client_id="NOPROFILE", profile=False)
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    ctx = steps_of(st, "client_context")[0]
+    assert ctx["status"] == "needs_attention" and "No client profile exists for NOPROFILE" in ctx["error"]
+    assert "SAM-AG-050" not in seen                                   # Shruti never ran on invented facts
+
+    async with async_session_maker() as s:
+        s.add(ClientProfile(client_id="DRAFTONLY", name="Draft Hospital", services=[], locations=[],
+                            key_messages=[], status="draft", version=3, updated_by="divya"))
+        await s.commit()
+    pid = await _new_project(client_id="DRAFTONLY", profile=False)
+    await R.start_project(pid, None, "tester")
+    st = await run_until_blocked(pid)
+    assert "(version 3) is not approved" in steps_of(st, "client_context")[0]["error"]
+
+
+async def test_smriti_hands_the_approved_profile_to_shruti(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    seen = {}
+    stub(monkeypatch, seen=seen)
+    pid = await _new_project()
+    await R.start_project(pid, None, "tester")
+    await run_until_blocked(pid)
+    task, ctx = seen["SAM-AG-050"][0]
+    pack = next(x for x in ctx["handed_over"] if x["step"] == "Client context")["record"]
+    assert pack["brand_voice"] == "Calm and clear" and pack["services"] == ["Diabetes clinic"]
+    assert pack["status"] == "loaded" and pack["approved_by"] == "approver"
+
+
+async def test_research_is_checked_against_the_approved_library(monkeypatch, no_kick):
+    await _ensure_agents("active")
+    approved = await _add_source("KNOW", "approved")
+    proposed = await _add_source("KNOW", "proposed", text="Diabetes screening camps run every month. " * 5,
+                                 title="Unreviewed diabetes page")
+    other = await _add_source("OTHER-CLIENT", "approved", text="Diabetes care at another client. " * 5,
+                              title="Other client diabetes")
+    facts = {"facts": [
+        {"fact": "About 1 in 10 adults lives with diabetes.", "source_id": approved + "#1",
+         "quote": "About 1 in 10 adults worldwide lives with diabetes."},
+        {"fact": "About 1 in 5 adults lives with diabetes.", "source_id": approved,
+         "quote": "About 1 in 10 adults worldwide lives with diabetes."},
+        {"fact": "Screening camps run every month.", "source_id": proposed,
+         "quote": "Diabetes screening camps run every month."},
+        {"fact": "Cinnamon cures diabetes.", "source_id": approved, "quote": "Cinnamon fully cures diabetes in weeks."},
+    ], "excluded": []}
+    seen = {}
+    stub(monkeypatch, seen=seen, answers={"SAM-AG-081": facts},
+         writer_text=_writer(seen, "1 in 5 adults have diabetes. Get checked.", "1 in 10 adults have diabetes. Get checked."))
+    pid = await _new_project(name="World Diabetes Day early signs", client_id="KNOW")
+    await R.start_project(pid, "Posts about early signs of type 2 diabetes and screening.", "tester")
+    st = await _to_gate2(pid)
+
+    task, ctx = seen["SAM-AG-081"][0]
+    given = {x["source_id"] for x in ctx["source_library"]}
+    assert given == {approved}                         # not the unapproved one, not another client's
+    assert "source_id" in task and approved in task
+
+    res = steps_of(st, "research")[0]["result"]
+    assert [f["verified"] for f in res["facts"]] == [True, False, False, False]
+    assert res["facts"][0]["url"] == "https://www.who.int/news-room/fact-sheets/detail/diabetes"
+    assert "figures not in the quote" in res["facts"][1]["reason"]
+    assert res["facts"][2]["reason"] == "not from an approved source in the library"
+    assert res["facts"][3]["reason"] == "the quote was not found in the source"
+    assert res["verified_count"] == 1 and res["sources_available"] == 1
+
+    # Shuddhi: only verified facts are evidence, so "1 in 5" goes back and "1 in 10" passes
+    shuddhi = steps_of(st, "shuddhi")
+    assert 'post 1: figure "1 in 5" is not in the research pack' in shuddhi[0]["result"]["code_check"]["findings"]
+    assert shuddhi[1]["result"]["code_check"]["passed"] is True
+    assert st["pending_approval"]["agent_id"] == "SAM-AG-052"

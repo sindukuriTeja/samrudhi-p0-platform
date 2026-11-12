@@ -60,6 +60,7 @@ const I = {
   x: svg('<path d="M18 6 6 18M6 6l12 12"/>', 16),
   pencil: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>', 16),
   retry: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>', 16),
+  book: svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/>'),
   ext: svg('<path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>', 14),
 };
 const SYM = {
@@ -227,6 +228,7 @@ function renderSidebar() {
           <span class="dot ${p.status === 'running' ? 'sky' : p.status === 'paused' ? 'standby' : 'red'}"></span><span class="ellipsis">${esc(p.name)}</span></a>`).join('')}
       </div>
       ${navBtn('#/agents', I.users, 'Agents', v.name === 'agents', false)}
+      ${navBtn('#/knowledge', I.book, 'Knowledge', v.name === 'knowledge', false)}
     </nav>
     <div class="monitor-card">
       <p class="section-label">Monitoring</p>
@@ -278,6 +280,7 @@ function route() {
   else if (parts[0] === 'projects') S.view = { name: 'projects' }, viewProjects();
   else if (parts[0] === 'history') S.view = { name: 'history', id: parts[1] || null }, viewHistory(parts[1] || null);
   else if (parts[0] === 'agents') S.view = { name: 'agents' }, viewAgents();
+  else if (parts[0] === 'knowledge') S.view = { name: 'knowledge', client: parts[1] || null }, viewKnowledge(parts[1] || null);
   else { location.replace('#/projects/new'); return; }
   renderSidebar();
   $('#main').focus({ preventScroll: true });
@@ -747,5 +750,139 @@ function viewAgents() {
 renderSidebar();
 loadWorkforce();
 wfLive.start();
+/* ======================================================================
+   Knowledge — client profiles (Smriti) and the approved source library (Anvesh)
+   ====================================================================== */
+const KSTATUS = { approved: ['Approved', 'st-running'], draft: ['Draft · needs approval', 'st-awaiting'], missing: ['No profile', 'st-needs_attention'],
+  proposed: ['Proposed · needs approval', 'st-awaiting'], retired: ['Retired', 'st-draft'] };
+const kchip = st => { const [l, c] = KSTATUS[st] || [st, 'st-draft']; return `<span class="status-chip ${c}">${esc(l)}</span>`; };
+const lines = v => (v || []).join('\n');
+const unlines = v => String(v || '').split('\n').map(x => x.trim()).filter(Boolean);
+
+async function viewKnowledge(clientId) {
+  main(`<header class="page-head"><h1>Knowledge</h1><p>The approved facts the agents may use. Smriti loads only an approved client profile; Anvesh's facts are verified only against approved sources. Every change needs a second person to approve it.</p></header>
+    <div class="page" id="kn">${stateView('loading')}</div>`);
+  let clients = [], cur = null, sources = [], filter = 'proposed,approved', openSrc = null;
+  const box = () => $('#kn');
+  async function load() {
+    try {
+      clients = await api('/api/knowledge/clients');
+      const cid = clientId || (clients[0] && clients[0].client_id);
+      [cur, sources] = await Promise.all([api('/api/knowledge/clients/' + encodeURIComponent(cid)),
+        api('/api/knowledge/sources?client_id=' + encodeURIComponent(cid) + '&status=' + filter)]);
+      cur.client_id = cid;
+      render();
+    } catch (e) { box().innerHTML = stateView('error', 'Could not load the knowledge store', esc(e.message), true); box().querySelector('[data-retry]').onclick = load; }
+  }
+  function render() {
+    const b = box(); if (!b) return;
+    const pr = cur.profile, r = cur.rules, me = S.auth && S.auth.username;
+    const canApproveProfile = pr && pr.status === 'draft' && pr.updated_by !== me;
+    b.innerHTML = `
+      <div class="filters">
+        <label class="field" style="flex-direction:row;align-items:center;gap:10px" for="kn-client">Client
+          <select class="chip-select on" id="kn-client">${clients.map(c => `<option value="${esc(c.client_id)}" ${c.client_id === cur.client_id ? 'selected' : ''}>${esc(c.name || c.client_id)} · ${esc(c.client_id)}</option>`).join('')}</select></label>
+        ${kchip(pr ? pr.status : 'missing')}
+        ${pr ? `<span class="muted small">Version ${esc(pr.version)} · edited by ${esc(pr.updated_by)}${pr.approved_by ? ' · approved by ' + esc(pr.approved_by) + ' ' + esc(date(pr.approved_at)) : ''}</span>` : ''}
+      </div>
+      <div class="kn-grid">
+        <form class="card kn-card" id="kn-profile" novalidate>
+          <h2>Client profile <span class="muted small">(Smriti)</span></h2>
+          <p class="muted small">Only approved facts reach the agents. Saving makes the profile a draft until a different signed-in person approves it.</p>
+          <label class="field">Client name<input name="name" maxlength="200" value="${esc(pr ? pr.name : (clients.find(c => c.client_id === cur.client_id) || {}).name || '')}"></label>
+          <label class="field">Brand voice<textarea name="brand_voice" maxlength="2000">${esc(pr ? pr.brand_voice : '')}</textarea></label>
+          <label class="field">Audience<textarea name="audience" maxlength="2000">${esc(pr ? pr.audience : '')}</textarea></label>
+          <label class="field">Services (one per line)<textarea name="services">${esc(pr ? lines(pr.services) : '')}</textarea></label>
+          <label class="field">Locations (one per line)<textarea name="locations">${esc(pr ? lines(pr.locations) : '')}</textarea></label>
+          <label class="field">Key messages (one per line)<textarea name="key_messages">${esc(pr ? lines(pr.key_messages) : '')}</textarea></label>
+          <p class="form-error" id="kn-perr" role="alert"></p>
+          <div class="row" style="gap:8px">
+            <button class="btn btn-primary" type="submit">${I.check} Save as draft</button>
+            ${pr && pr.status === 'draft' ? `<button class="btn" type="button" id="kn-approve" ${canApproveProfile ? '' : 'disabled'} title="${canApproveProfile ? 'Approve this version' : 'The person who made the last change cannot approve it'}">Approve version ${esc(pr.version)}</button>` : ''}
+          </div>
+          <div class="kn-rules">
+            <p class="section-label">Safety rules for this client (config/safety_rules.yaml, checked in code)</p>
+            <div class="small"><b>Required disclaimer:</b> ${r.required_disclaimers.length ? esc(r.required_disclaimers.join(' / ')) : '<span class="muted">none</span>'}</div>
+            <div class="small"><b>Never write:</b> ${esc(r.forbidden_claims.join('; '))}</div>
+          </div>
+        </form>
+        <section class="card kn-card" aria-labelledby="kn-src-h">
+          <h2 id="kn-src-h">Source library <span class="muted small">(Anvesh)</span></h2>
+          <p class="muted small">Add a page from an allowed health site, or paste text. A different person approves it before facts can be verified against it.</p>
+          <form id="kn-add" class="kn-add" novalidate>
+            <label class="field">Page address (https, allowed sites only)<input name="url" placeholder="https://www.who.int/news-room/fact-sheets/detail/diabetes"></label>
+            <div class="row" style="gap:8px;flex-wrap:nowrap">
+              <label class="field" style="flex:1">Publisher<input name="publisher" placeholder="WHO"></label>
+              <label class="field" style="flex:1">Topics (comma separated)<input name="topics" placeholder="diabetes, screening"></label>
+            </div>
+            <label class="field">Title (optional when fetching)<input name="title" maxlength="300"></label>
+            <label class="field">Or paste the text (at least 200 characters)<textarea name="text" maxlength="30000"></textarea></label>
+            <label class="row small" style="gap:6px"><input type="checkbox" name="shared" checked> Shared with all clients</label>
+            <p class="form-error" id="kn-serr" role="alert"></p>
+            <div class="row" style="gap:8px"><button class="btn btn-primary" type="submit" name="mode" value="fetch">${I.ext} Fetch page</button><button class="btn" type="submit" name="mode" value="paste">Add pasted text</button></div>
+          </form>
+          <div class="filters">${[['proposed,approved', 'In use and proposed'], ['proposed', 'Needs approval'], ['approved', 'Approved'], ['retired', 'Retired']].map(([v, l]) => `<button class="chip${filter === v ? ' on' : ''}" data-filter="${v}">${l}</button>`).join('')}</div>
+          <div class="hist-list">${sources.length ? sources.map(x => `
+            <div class="hist-item kn-src">
+              <div class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:8px"><span class="ellipsis" style="font-weight:600" title="${esc(x.title)}">${esc(x.title)}</span>${kchip(x.status)}</div>
+              <div class="muted small"><span class="mono">${esc(x.id)}</span> · ${esc(x.publisher || 'no publisher')} · ${x.client_id ? 'this client only' : 'shared'} · ${esc(x.origin)} by ${esc(x.added_by)}${x.approved_by ? ' · approved by ' + esc(x.approved_by) : ''} · ${esc(x.chars)} characters</div>
+              ${x.url ? `<a class="small" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)} ${I.ext}</a>` : ''}
+              ${openSrc === x.id ? `<pre class="kn-text">${esc(x.full || x.text)}</pre>` : `<div class="small muted">${esc((x.text || '').slice(0, 220))}…</div>`}
+              <div class="row" style="gap:8px">
+                <button class="btn btn-sm" data-view="${esc(x.id)}">${openSrc === x.id ? 'Hide text' : 'Read text'}</button>
+                ${x.status === 'proposed' ? `<button class="btn btn-sm" data-approve="${esc(x.id)}" ${x.added_by === me ? 'disabled title="You added this source; a different person must approve it"' : ''}>${I.check} Approve</button>` : ''}
+                ${x.status !== 'retired' ? `<button class="btn btn-sm btn-ghost" data-retire="${esc(x.id)}">Retire</button>` : ''}
+              </div>
+            </div>`).join('') : `<div class="muted small">No sources here yet.</div>`}</div>
+        </section>
+      </div>`;
+    $('#kn-client').onchange = e => { location.hash = '#/knowledge/' + encodeURIComponent(e.target.value); };
+    $('#kn-profile').onsubmit = async ev => {
+      ev.preventDefault(); const fd = new FormData(ev.target); $('#kn-perr').textContent = '';
+      try {
+        const body = { name: fd.get('name'), brand_voice: fd.get('brand_voice'), audience: fd.get('audience'),
+          services: unlines(fd.get('services')), locations: unlines(fd.get('locations')), key_messages: unlines(fd.get('key_messages')) };
+        const r2 = await act(() => api('/api/knowledge/clients/' + encodeURIComponent(cur.client_id), { method: 'PUT', json: body }));
+        if (r2) { toast('Saved as draft. A different person must approve it.'); load(); }
+      } catch (e) { $('#kn-perr').textContent = e.message; }
+    };
+    const ap = $('#kn-approve');
+    if (ap) ap.onclick = async () => {
+      try { const r2 = await act(() => api('/api/knowledge/clients/' + encodeURIComponent(cur.client_id) + '/approve', { method: 'POST' })); if (r2) { toast('Profile approved'); load(); } }
+      catch (e) { $('#kn-perr').textContent = e.message; }
+    };
+    $('#kn-add').onsubmit = async ev => {
+      ev.preventDefault(); const f = ev.target, fd = new FormData(f), mode = ev.submitter && ev.submitter.value; $('#kn-serr').textContent = '';
+      const topics = String(fd.get('topics') || '').split(',').map(x => x.trim()).filter(Boolean);
+      const client_id = fd.get('shared') ? null : cur.client_id;
+      const btns = $$('button', f); btns.forEach(x => { x.disabled = true; });
+      try {
+        const r2 = await act(() => mode === 'fetch'
+          ? api('/api/knowledge/sources/fetch', { method: 'POST', json: { url: fd.get('url'), title: fd.get('title') || null, publisher: fd.get('publisher'), topics, client_id } })
+          : api('/api/knowledge/sources', { method: 'POST', json: { url: fd.get('url'), title: fd.get('title'), publisher: fd.get('publisher'), topics, text: fd.get('text'), client_id } }));
+        if (r2) { toast(`Added ${r2.id}. A different person must approve it.`); filter = 'proposed'; load(); }
+      } catch (e) {
+        const d = e.detail; $('#kn-serr').textContent = Array.isArray(d) ? d.map(x => x.msg).join('; ') : e.message;
+      } finally { btns.forEach(x => { x.disabled = false; }); }
+    };
+    $$('[data-filter]', b).forEach(x => x.onclick = () => { filter = x.dataset.filter; load(); });
+    $$('[data-view]', b).forEach(x => x.onclick = async () => {
+      const id = x.dataset.view; if (openSrc === id) { openSrc = null; return render(); }
+      try { const full = await api('/api/knowledge/sources/' + encodeURIComponent(id)); const row = sources.find(y => y.id === id); if (row) row.full = full.text; openSrc = id; render(); }
+      catch (e) { toast(e.message); }
+    });
+    $$('[data-approve]', b).forEach(x => x.onclick = async () => {
+      try { const r2 = await act(() => api('/api/knowledge/sources/' + encodeURIComponent(x.dataset.approve) + '/approve', { method: 'POST' })); if (r2) { toast('Source approved'); load(); } }
+      catch (e) { toast(e.message); }
+    });
+    $$('[data-retire]', b).forEach(x => x.onclick = async () => {
+      if (!confirm('Retire this source? Facts can no longer be verified against it.')) return;
+      try { const r2 = await act(() => api('/api/knowledge/sources/' + encodeURIComponent(x.dataset.retire) + '/retire', { method: 'POST' })); if (r2) { toast('Source retired'); load(); } }
+      catch (e) { toast(e.message); }
+    });
+  }
+  load();
+}
+
 route();
 })();
