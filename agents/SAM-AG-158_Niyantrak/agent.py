@@ -60,7 +60,7 @@ HARD RULES — NEVER VIOLATE:
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -144,4 +144,19 @@ HARD RULES — NEVER VIOLATE:
             "model_name": model_name,
             "tools": tools or [],
             "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
         }

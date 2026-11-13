@@ -1,4 +1,4 @@
-"""Anvesh — Healthcare Research Agent (SAM-AG-081).
+"""Anvesh — Healthcare Content Research (SAM-AG-081).
 
 Phase 2 content pilot agent. Owns healthcare research: gathers validated
 facts, source citations, and clinical references for content production.
@@ -11,16 +11,17 @@ import uuid
 from agents.base import BaseAgent, AgentResult, register_agent
 from backend.core.llm import generate
 from backend.core.authority import authority_guard
+from backend.core import knowledge
 from backend.core.message_bus import BusEnvelope, bus
 
 
 @register_agent
 class Anvesh(BaseAgent):
-    """Healthcare Research Agent."""
+    """Healthcare Content Research."""
 
     canonical_id = "SAM-AG-081"
     name = "Anvesh"
-    designation = "Healthcare Research Agent"
+    designation = "Healthcare Content Research"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,11 +35,11 @@ class Anvesh(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Anvesh, the Healthcare Research Agent (SAM-AG-081 · CRT-016) of Samrudhi,
+    SYSTEM_PROMPT = """You are Anvesh, Healthcare Content Research (SAM-AG-081 · CRT-007) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-081 · Position: CRT-016
+- Canonical ID: SAM-AG-081 · Position: CRT-007
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
@@ -75,7 +76,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -162,6 +163,31 @@ HARD RULES — NEVER VIOLATE
             "verdict": verdict,
             "evidence_count": len(evidence),
             "validated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @authority_guard("crt.validate_claims")
+    def verify_facts(
+        self,
+        facts: list,
+        library: dict,
+    ) -> dict:
+        """Verify research facts in code against the approved source library.
+
+        facts:   [{fact, source_id, quote}] as written by the model
+        library: {source_id: {title, publisher, url, text}} approved sources only
+        A fact is verified only when its quote is found in the cited source and the fact's
+        figures appear in that quote. Title, publisher and link come from the library.
+        """
+        checked = [knowledge.verify_fact(f if isinstance(f, dict) else {"fact": str(f)}, library or {})
+                   for f in (facts or [])]
+        verified = sum(1 for f in checked if f["verified"])
+        return {
+            "facts": checked,
+            "verified": verified,
+            "unverified": len(checked) - verified,
+            "sources_available": len(library or {}),
+            "status": "checked",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
         }
 
     @authority_guard("crt.escalate_research")

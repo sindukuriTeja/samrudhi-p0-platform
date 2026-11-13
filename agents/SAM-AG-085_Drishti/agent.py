@@ -1,4 +1,4 @@
-"""Drishti — Analytics Agent (SAM-AG-085).
+"""Drishti — Social Media Performance (SAM-AG-085).
 
 Phase 2 content pilot agent. Owns social/content analytics under Aarya:
 tracks content performance, engagement metrics, and produces analytics reports.
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Drishti(BaseAgent):
-    """Analytics Agent."""
+    """Social Media Performance."""
 
     canonical_id = "SAM-AG-085"
     name = "Drishti"
-    designation = "Analytics Agent"
+    designation = "Social Media Performance"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -33,11 +33,11 @@ class Drishti(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Drishti, the Analytics Agent (SAM-AG-085 · CRT-025) of Samrudhi,
+    SYSTEM_PROMPT = """You are Drishti, Social Media Performance (SAM-AG-085 · CRT-011) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-085 · Position: CRT-025
+- Canonical ID: SAM-AG-085 · Position: CRT-011
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
@@ -74,7 +74,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:

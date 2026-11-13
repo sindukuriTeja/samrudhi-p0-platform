@@ -3,6 +3,7 @@
 Stage 1B service-first agent. Sets system design standards; reviews technical choices.
 Service-first: no LLM. Pure code review / standards enforcement.
 """
+from datetime import datetime, timezone
 from agents.base import BaseAgent, AgentResult, register_agent
 from backend.core.authority import authority_guard
 
@@ -68,3 +69,18 @@ class Vinyas(BaseAgent):
     def get_standards(self) -> dict:
         """Return current architecture standards."""
         return dict(self.STANDARDS)
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
+        }

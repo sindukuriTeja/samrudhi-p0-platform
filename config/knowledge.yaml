@@ -1,0 +1,48 @@
+# Real information for the agents (backend/core/knowledge.py).
+#
+# Client knowledge store: one profile per client (brand voice, audience, services, locations,
+# key messages). Smriti loads only an APPROVED profile; a person edits it and a DIFFERENT
+# signed-in person approves it. A client without an approved profile stops at Smriti's step.
+#
+# Source library: pages a person adds (pasted text, or fetched from an allowed site below) and a
+# DIFFERENT signed-in person approves. The code picks the passages that match the project and
+# gives them to Anvesh; a fact is "verified" only when its quote is found in the cited approved
+# source and its figures appear in that quote. Agents never browse: only a person adds sources.
+version: 1
+
+fetch:
+  # Only https pages on these sites (or their subdomains) can be fetched into the library.
+  allowed_domains:
+    - who.int
+    - cdc.gov
+    - nih.gov
+    - medlineplus.gov
+    - nhs.uk
+    - idf.org
+    - diabetesatlas.org
+    - diabetes.org
+    - icmr.gov.in
+    - icmr.nic.in
+    - mohfw.gov.in
+    - nhp.gov.in
+  timeout_s: 20
+  max_bytes: 2000000          # larger pages are refused
+  max_redirects: 3
+  max_text_chars: 30000       # text kept per source
+
+retrieval:
+  max_sources: 4              # sources given to Anvesh per project
+  passages_per_source: 2
+  passage_chars: 450
+  max_total_chars: 2000       # the local model reads ~4k tokens; keep the library short
+
+verification:
+  min_quote_words: 5          # shorter quotes cannot verify a fact
+  min_quote_overlap: 0.8      # share of the quote's words found together in one source sentence
+  min_fact_overlap: 0.3       # share of the fact's key words that must appear in its quote
+
+roles:
+  edit_profile: [founder, client_experience_lead, assurance_lead]
+  approve_profile: [founder, client_experience_lead, assurance_lead]
+  add_source: [founder, client_experience_lead, assurance_lead]
+  approve_source: [founder, assurance_lead]

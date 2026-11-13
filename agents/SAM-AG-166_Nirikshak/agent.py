@@ -62,3 +62,18 @@ class Nirikshak(BaseAgent):
         total = len(self._log)
         total_tokens = sum(e.get("tokens", 0) for e in self._log)
         return {"total_runs": total, "total_tokens": total_tokens}
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
+        }

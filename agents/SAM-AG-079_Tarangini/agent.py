@@ -1,7 +1,12 @@
-"""Tarangini — Video Content Agent (SAM-AG-079).
+"""Tarangini — Social Media & Distribution Lead (SAM-AG-079 · CRT-005).
 
-Phase 2 content pilot agent. Owns video content under Aarya:
-creates video scripts, storyboards, video production briefs for healthcare content.
+Stage 2 Phase 2 content-pilot agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Own social media distribution: pick the platform, format and posting time for each
+approved post, keep the distribution plan and platform standards, and coordinate with
+Prakash for publishing. Tarangini manages client social media; Tarang markets Samrudhi
+itself. [PDF 01A.06 · CRT-005 Social Media & Distribution Lead]
+Reports to Aarya (AI CCO, SAM-AG-003).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -13,57 +18,71 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Tarangini(BaseAgent):
-    """Video Content Agent."""
+    """Social Media & Distribution Lead."""
 
     canonical_id = "SAM-AG-079"
     name = "Tarangini"
-    designation = "Video Content Agent"
+    designation = "Social Media & Distribution Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
-        "crt.create_video_script": True,
-        "crt.create_storyboard": True,
-        "crt.set_video_specs": True,
-        "crt.check_video_compliance": True,
-        "crt.escalate_video": True,
-        "tec.grant_access": False,
+        "crt.create_distribution_plan": True,
+        "crt.set_platform_format": True,
+        "crt.schedule_posting_slot": True,
+        "crt.check_platform_rules": True,
+        "crt.escalate_distribution_issue": True,
         "gov.certify": False,
         "gov.modify_finding": False,
+        "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Tarangini, the Video Content Agent (SAM-AG-079 · CRT-024) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "create_distribution_plan": "crt.create_distribution_plan",
+        "set_platform_format": "crt.set_platform_format",
+        "schedule_posting_slot": "crt.schedule_posting_slot",
+        "check_platform_rules": "crt.check_platform_rules",
+        "escalate_distribution_issue": "crt.escalate_distribution_issue",
+    }
+
+    SYSTEM_PROMPT = """You are Tarangini, Social Media & Distribution Lead (SAM-AG-079 · CRT-005) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-079 · Position: CRT-024
+- Canonical ID: SAM-AG-079 · Position: CRT-005 · Department: Creative, Content & Social Media
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
 YOUR MISSION
-Own video content. Create video scripts, storyboards, video production briefs
-for healthcare content. Ensure video content is compliant and on-brand.
-Never publish without approval. Never provide medical advice.
+Own social media distribution: pick the platform, format and posting time for each approved
+post, keep the distribution plan and platform standards, and coordinate with Prakash for
+publishing. Tarangini manages client social media; Tarang markets Samrudhi itself. [PDF 01A.06 ·
+CRT-005 Social Media & Distribution Lead]
 
 YOUR REGISTERS
-1. Video Script Register — scripts, versions, status
-2. Storyboard Register — storyboards, scenes, specs
-3. Video Specs Register — formats, durations, platforms
-4. Video Compliance Register — compliance checks, findings
-5. Video Escalation Register — blockers, escalations
+1. Distribution Plan Register — post, platform, format, time
+2. Platform Standards Register — platform, rule, version
+
+AUTHORITY MATRIX
+crt.create_distribution_plan · crt.set_platform_format · crt.schedule_posting_slot · crt.check_platform_rules · crt.escalate_distribution_issue
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never publish video without approval.
-2. Never provide medical advice in video scripts.
-3. Never fabricate video metrics. Missing = "unavailable".
-4. Never suppress a compliance issue.
-5. Respect tenant isolation.
-6. If the local model is down, report it honestly."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Never publish — publishing is Prakash's job and only for approved content.
+5. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "create")
+        action = kwargs.get("action", "distribute")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -74,7 +93,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -86,7 +105,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="crt.video",
+                event_type="crt.distribution",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -97,115 +116,82 @@ HARD RULES — NEVER VIOLATE
             pass
         return AgentResult(text=text, agent_id=self.canonical_id, tokens_used=tokens, status="completed")
 
-    @authority_guard("crt.create_video_script")
-    def create_video_script(
-        self,
-        client_id: str,
-        topic: str,
-        duration: str,
-        brief: dict,
-    ) -> dict:
-        """Create a video script."""
-        script_id = f"VSC-{uuid.uuid4().hex[:6].upper()}"
+    # ------------------------------------------------------------------
+    # Tarangini's tools (authority-guarded)
+    # ------------------------------------------------------------------
+
+    @authority_guard("crt.create_distribution_plan")
+    def create_distribution_plan(self, client_id: str, posts: list) -> dict:
+        """Create the distribution plan."""
         return {
-            "script_id": script_id,
+            "record_id": f"TAR-{uuid.uuid4().hex[:6].upper()}",
             "client_id": client_id,
-            "topic": topic,
-            "duration": duration,
-            "script": "",
-            "status": "draft",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "posts": posts,
+            "action": "create_distribution_plan",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("crt.create_storyboard")
-    def create_storyboard(
-        self,
-        script_id: str,
-        scenes: list,
-    ) -> dict:
-        """Create a storyboard for a video script."""
-        storyboard_id = f"STB-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("crt.set_platform_format")
+    def set_platform_format(self, post_id: str, platform: str, content_format: str) -> dict:
+        """Set a post's platform and format."""
         return {
-            "storyboard_id": storyboard_id,
-            "script_id": script_id,
-            "scenes": scenes,
-            "status": "draft",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"TAR-{uuid.uuid4().hex[:6].upper()}",
+            "post_id": post_id,
+            "platform": platform,
+            "content_format": content_format,
+            "action": "set_platform_format",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("crt.set_video_specs")
-    def set_video_specs(
-        self,
-        script_id: str,
-        formats: list,
-        platforms: list,
-        technical_specs: dict,
-    ) -> dict:
-        """Set video production specifications."""
+    @authority_guard("crt.schedule_posting_slot")
+    def schedule_posting_slot(self, post_id: str, slot: str) -> dict:
+        """Pick a posting time."""
         return {
-            "script_id": script_id,
-            "formats": formats,
-            "platforms": platforms,
-            "technical_specs": technical_specs,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"TAR-{uuid.uuid4().hex[:6].upper()}",
+            "post_id": post_id,
+            "slot": slot,
+            "action": "schedule_posting_slot",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("crt.check_video_compliance")
-    def check_video_compliance(
-        self,
-        script_id: str,
-        script: str,
-        compliance_rules: dict,
-    ) -> dict:
-        """Check video script for compliance."""
-        violations = []
+    @authority_guard("crt.check_platform_rules")
+    def check_platform_rules(self, post_id: str, platform: str) -> dict:
+        """Check platform rules."""
         return {
-            "script_id": script_id,
-            "compliant": len(violations) == 0,
-            "violations": violations,
-            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"TAR-{uuid.uuid4().hex[:6].upper()}",
+            "post_id": post_id,
+            "platform": platform,
+            "action": "check_platform_rules",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("crt.escalate_video")
-    def escalate_video_issue(
-        self,
-        client_id: str,
-        severity: str,
-        description: str,
-    ) -> dict:
-        """Escalate a video content issue."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("crt.escalate_distribution_issue")
+    def escalate_distribution_issue(self, post_id: str, issue: str) -> dict:
+        """Escalate a distribution issue."""
         return {
-            "incident_id": incident_id,
-            "client_id": client_id,
-            "severity": severity,
-            "description": description,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"TAR-{uuid.uuid4().hex[:6].upper()}",
+            "post_id": post_id,
+            "issue": issue,
+            "action": "escalate_distribution_issue",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    def list_scripts(
-        self,
-        client_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List video scripts (read-only)."""
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
+
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
         return {
-            "scripts": [],
+            "records": [],
             "count": 0,
-            "filter": {"client_id": client_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_storyboard(
-        self,
-        storyboard_id: str,
-    ) -> dict:
-        """Get storyboard details (read-only)."""
-        return {
-            "storyboard_id": storyboard_id,
-            "details": {},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -220,5 +206,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

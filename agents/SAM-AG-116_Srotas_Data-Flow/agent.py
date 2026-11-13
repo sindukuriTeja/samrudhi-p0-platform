@@ -1,4 +1,4 @@
-"""Srotas — Data Flow Agent (SAM-AG-116).
+"""Srotas — Data Integration Lead (SAM-AG-116).
 
 Phase 3 analytics/data agent. Owns data flow architecture: designs data pipelines,
 integrates sources, manages flow orchestration, checks connectivity, and escalates
@@ -16,11 +16,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Srotas(BaseAgent):
-    """Data Flow Agent."""
+    """Data Integration Lead."""
 
     canonical_id = "SAM-AG-116"
     name = "Srotas"
-    designation = "Data Flow Agent"
+    designation = "Data Integration Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,7 +34,7 @@ class Srotas(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Srotas, the Data Flow Agent (SAM-AG-116 · DAT-002) of Samrudhi,
+    SYSTEM_PROMPT = """You are Srotas, Data Integration Lead (SAM-AG-116 · DAT-002) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
@@ -85,7 +85,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:

@@ -16,6 +16,22 @@ from backend.database import async_session_maker
 from backend.models import BusEvent
 
 
+import contextlib as _contextlib
+import contextvars as _contextvars
+
+# While competency tests run, agents' tools must not send real events (alerts, escalations).
+_suppressed: _contextvars.ContextVar[bool] = _contextvars.ContextVar("bus_suppressed", default=False)
+
+
+@_contextlib.contextmanager
+def suppress_publishing():
+    token = _suppressed.set(True)
+    try:
+        yield
+    finally:
+        _suppressed.reset(token)
+
+
 @dataclass
 class BusEnvelope:
     """The exact JSON envelope every bus event uses (architecture section 5.1)."""
@@ -52,6 +68,8 @@ class MessageBus:
 
         Returns the event_id.
         """
+        if _suppressed.get():
+            return envelope.event_id  # competency test: nothing is sent or logged
         async with async_session_maker() as session:
             event = BusEvent(
                 event_id=envelope.event_id,
@@ -95,6 +113,8 @@ class MessageBus:
         Runs the async publish in a dedicated event loop. Safe to call from
         non-async contexts (e.g. agent.run()).
         """
+        if _suppressed.get():
+            return envelope.event_id  # competency test: nothing is sent or logged
         import asyncio
         try:
             loop = asyncio.get_event_loop()

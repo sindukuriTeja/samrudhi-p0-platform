@@ -1,0 +1,39 @@
+# Cost rates and KPI targets, used in code by Lagaat (cost) and Lakshya (KPIs).
+# backend/projects/metrics.py measures every project from its own records; these settings only
+# turn the measurements into money and into pass/fail against targets.
+#
+# A rate set to null means "not known": the cost is then reported as unavailable (never guessed).
+version: 1
+
+currency: INR
+
+rates:
+  # The local model (Ollama) has no per-token charge.
+  model_cost_per_1k_tokens: 0.0
+  # Running cost of the machine while the model works (electricity, hardware wear), per hour of
+  # model time. Unknown until someone measures it.
+  compute_cost_per_model_hour: null
+  # Cost of a person's time at the human gates, per hour, and the minutes one review takes.
+  human_rate_per_hour: null
+  review_minutes_per_decision: null
+
+# KPI targets (Lakshya). Each KPI is measured in code and compared with its target.
+kpis:
+  first_pass_rate:            # share of check runs that passed without a send-back
+    target: 0.7
+    better: higher
+  rework_rounds:              # rework rounds opened by Punargathan
+    target: 1
+    better: lower
+  on_time_rate:               # share of work packages published by their due date
+    target: 1.0
+    better: higher
+  verified_fact_rate:         # share of Anvesh's facts verified against an approved source
+    target: 0.5
+    better: higher
+  model_failure_rate:         # share of model runs that failed (model unavailable, bad output)
+    target: 0.05
+    better: lower
+  cycle_time_hours:           # Start to the end of the project
+    target: 24
+    better: lower

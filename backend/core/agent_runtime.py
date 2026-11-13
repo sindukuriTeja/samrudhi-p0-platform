@@ -74,15 +74,27 @@ async def _check_tool_permissions(session: AsyncSession, canonical_id: str) -> t
 
 
 async def _check_competency_tests(session: AsyncSession, canonical_id: str) -> tuple[bool, str]:
-    """Verify the agent has a run() method and passes basic competency."""
+    """Real competency, not "a run() method exists":
+
+    1. the agent's code competency suite passes now (backend/core/competency.py: identity,
+       governance limits, escalation, tools, and the expected decisions of its code tools), and
+    2. a person with an assurance role certified it (backend/core/certification.py) on evidence
+       from its current code — including a model test for thinking agents with model steps —
+       and the certification is not expired or revoked.
+    """
     try:
-        from agents.base import get_agent_class
-        cls = get_agent_class(canonical_id)
-        if cls is None:
-            return False, "Agent class not registered"
-        if not hasattr(cls, "run") or not callable(getattr(cls, "run")):
-            return False, "No run() method"
-        return True, "run() method present"
+        import asyncio
+        from backend.core.certification import validity
+        from backend.core.competency import run_code_tests
+        res = await asyncio.to_thread(run_code_tests, canonical_id)
+        if not res["passed"]:
+            failed = [f"{c['name']} ({c['detail']})" for c in res["cases"] if not c["passed"]]
+            return False, "code competency tests failed: " + "; ".join(failed)[:400]
+        v = await validity(session, canonical_id)
+        if not v["valid"]:
+            return False, (f"no valid certification: {v['reason']}. Run the competency tests and have an "
+                           "assurance lead certify the agent on the Assurance page.")
+        return True, f"{len(res['cases'])} code tests passed; {v['reason']} until {v.get('expires_at')}"
     except Exception as e:
         return False, f"Exception: {e}"
 

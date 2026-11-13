@@ -1,4 +1,4 @@
-"""Nirikshan — Work Monitoring Agent (SAM-AG-062 · OPS-005).
+"""Nirikshan — Delivery Control Lead (SAM-AG-062 · OPS-005).
 
 Phase 3 operations agent. Monitors work, checks progress, reports status,
 and detects deviations. Reports to Daksh (SAM-AG-002, AI COO).
@@ -15,14 +15,15 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Nirikshan(BaseAgent):
-    """Work Monitoring Agent."""
+    """Delivery Control Lead."""
 
     canonical_id = "SAM-AG-062"
     name = "Nirikshan"
-    designation = "Work Monitoring Agent"
+    designation = "Delivery Control Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
+        "ops.confirm_checks_present": True,
         "ops.monitor_work": True,
         "ops.check_progress": True,
         "ops.report_status": True,
@@ -33,7 +34,7 @@ class Nirikshan(BaseAgent):
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Nirikshan, the Work Monitoring Agent (SAM-AG-062 · OPS-005) of Samrudhi,
+    SYSTEM_PROMPT = """You are Nirikshan, Delivery Control Lead (SAM-AG-062 · OPS-005) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
@@ -80,7 +81,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -245,3 +246,11 @@ HARD RULES — NEVER VIOLATE
             "status": "pending_human_approval",
             "routed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @authority_guard("ops.confirm_checks_present")
+    def confirm_checks_present(self, checks: dict, required: list) -> dict:
+        """Confirm every required check has a recorded pass."""
+        missing = [c for c in required or [] if not (checks or {}).get(c)]
+        return {"checks": checks, "missing": missing,
+                "status": "ready" if not missing else "missing_check",
+                "confirmed_at": datetime.now(timezone.utc).isoformat()}

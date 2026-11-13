@@ -1,4 +1,4 @@
-"""Prativedan — Content Reporting Agent (SAM-AG-125).
+"""Prativedan — Client Reporting (SAM-AG-125).
 
 Phase 2 content pilot agent. Owns content reporting under Aarya:
 produces content performance reports, client reports, and content ROI analysis.
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Prativedan(BaseAgent):
-    """Content Reporting Agent."""
+    """Client Reporting."""
 
     canonical_id = "SAM-AG-125"
     name = "Prativedan"
-    designation = "Content Reporting Agent"
+    designation = "Client Reporting"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -33,12 +33,12 @@ class Prativedan(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Prativedan, the Content Reporting Agent (SAM-AG-125 · CRT-028) of Samrudhi,
+    SYSTEM_PROMPT = """You are Prativedan, Client Reporting (SAM-AG-125 · DAT-011) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-125 · Position: CRT-028
-- You report to Aarya (AI CCO, SAM-AG-003).
+- Canonical ID: SAM-AG-125 · Position: DAT-011
+- You report to Medha (AI CDO, SAM-AG-009).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
 YOUR MISSION
@@ -74,7 +74,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:

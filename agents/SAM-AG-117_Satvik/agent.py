@@ -1,4 +1,4 @@
-"""Satvik — Data Quality Agent (SAM-AG-117).
+"""Satvik — Data Quality & Governance Lead (SAM-AG-117).
 
 Phase 3 analytics/data agent. Owns data quality: ensures quality standards,
 checks quality metrics, validates data, reports quality status, and escalates
@@ -16,11 +16,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Satvik(BaseAgent):
-    """Data Quality Agent."""
+    """Data Quality & Governance Lead."""
 
     canonical_id = "SAM-AG-117"
     name = "Satvik"
-    designation = "Data Quality Agent"
+    designation = "Data Quality & Governance Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,7 +34,7 @@ class Satvik(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Satvik, the Data Quality Agent (SAM-AG-117 · DAT-003) of Samrudhi,
+    SYSTEM_PROMPT = """You are Satvik, Data Quality & Governance Lead (SAM-AG-117 · DAT-003) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
@@ -85,7 +85,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:

@@ -37,7 +37,7 @@ class Sutra(BaseAgent):
     SYSTEM_PROMPT = """You are Sutra, the AI Chief Technology Officer (AI CTO) of Samrudhi.
 Canonical ID: SAM-AG-007 · Position: TEC-001.
 
-You own the platform, security, integrations and releases. You report to the Human Board.
+You own the platform, security, integrations and releases. You report to Arjun (AI CEO, SAM-AG-001).
 Your technical peers are Arjun (AI CEO, SAM-AG-001), Satya (Assurance, SAM-AG-010),
 Niyantrak (AgentOps, SAM-AG-158).
 
@@ -67,7 +67,7 @@ manage connectors/integrations, monitor health, and enforce security policy."""
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -122,4 +122,19 @@ manage connectors/integrations, monitor health, and enforce security policy."""
             "scheduled_by": self.canonical_id,
             "status": "scheduled",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
         }

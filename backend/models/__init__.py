@@ -18,6 +18,8 @@ from backend.models.p1_registers import (
     # Medha
     DataSource, KpiGovernance, Report, Forecast, Anomaly,
 )
+from backend.models.knowledge import ClientProfile, KnowledgeSource
+from backend.models.competency import CompetencyRun
 
 __all__ = [
     "Agent", "AgentVersion", "LifecycleEvent", "AgentSpec", "LifecycleState",
@@ -30,4 +32,5 @@ __all__ = [
     "ContentStrategy", "ContentCalendar", "ContentPackage", "BrandGuidelines", "QaReview",
     "ClientOnboarding", "ClientCommunication", "ApprovalWorkflow", "Feedback", "AccountHealth",
     "DataSource", "KpiGovernance", "Report", "Forecast", "Anomaly",
+    "ClientProfile", "KnowledgeSource", "CompetencyRun",
 ]

@@ -1,8 +1,10 @@
-"""Darpan — Data Mirror Agent (SAM-AG-126).
+"""Darpan — Dashboards & Visualisation (SAM-AG-126 · DAT-012).
 
-Phase 3 analytics/data agent. Owns data mirroring: mirrors data to replicas,
-syncs mirrors, verifies mirror integrity, reports mirror status, and escalates
-mirror issues. Reports to Medha (SAM-AG-009).
+Stage 2 Phase 3 operations, client, analytics and CEO-office agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Design and update dashboards and visualisations from validated KPI values; keep them
+accurate and refreshed. [PDF 01A.08 · DAT-012 Dashboard & Visualisation]
+Reports to Medha (AI CDO, SAM-AG-009).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -14,67 +16,69 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Darpan(BaseAgent):
-    """Data Mirror Agent."""
+    """Dashboards & Visualisation."""
 
     canonical_id = "SAM-AG-126"
     name = "Darpan"
-    designation = "Data Mirror Agent"
+    designation = "Dashboards & Visualisation"
     agent_type = "thinking"
 
     AUTHORITY = {
-        "dat.mirror_data": True,
-        "dat.sync_mirror": True,
-        "dat.verify_mirror": True,
-        "dat.report_mirror": True,
-        "dat.escalate_mirror_issue": True,
-        "tec.grant_access": False,
+        "dat.define_dashboard": True,
+        "dat.refresh_dashboard": True,
+        "dat.add_visualisation": True,
+        "dat.check_dashboard_accuracy": True,
+        "dat.escalate_dashboard_issue": True,
         "gov.certify": False,
         "gov.modify_finding": False,
+        "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Darpan, the Data Mirror Agent (SAM-AG-126 · DAT-009) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "define_dashboard": "dat.define_dashboard",
+        "refresh_dashboard": "dat.refresh_dashboard",
+        "add_visualisation": "dat.add_visualisation",
+        "check_dashboard_accuracy": "dat.check_dashboard_accuracy",
+        "escalate_dashboard_issue": "dat.escalate_dashboard_issue",
+    }
+
+    SYSTEM_PROMPT = """You are Darpan, Dashboards & Visualisation (SAM-AG-126 · DAT-012) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-126 · Position: DAT-009
-- You report to Medha (AI Head of Analytics, SAM-AG-009).
+- Canonical ID: SAM-AG-126 · Position: DAT-012 · Department: Analytics, Intelligence & Reporting
+- You report to Medha (AI CDO, SAM-AG-009).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
 YOUR MISSION
-Own data mirroring: mirror data to replicas for redundancy and performance,
-sync mirrors with source data, verify mirror integrity and consistency, report
-mirror status, and escalate mirror issues. Ensure reliable, consistent data
-replicas. Never fabricate mirror status — unknown = "unknown".
+Design and update dashboards and visualisations from validated KPI values; keep them accurate
+and refreshed. [PDF 01A.08 · DAT-012 Dashboard & Visualisation]
 
 YOUR REGISTERS
-1. Mirror Registry — mirror definitions, source, replica, status
-2. Sync Register — sync operations, timestamps, records synced
-3. Verification Register — integrity checks, checksums, results
-4. Mirror Report Register — reports, periods, status summaries
-5. Mirror Issue Register — failures, escalations, resolutions
+1. Dashboard Register — dashboard, audience, KPIs, refresh
+2. Visualisation Register — chart, KPI, source
 
 AUTHORITY MATRIX
-- dat.mirror_data: Create data mirrors to replicas
-- dat.sync_mirror: Synchronize mirrors with source data
-- dat.verify_mirror: Verify mirror integrity
-- dat.report_mirror: Report mirror status
-- dat.escalate_mirror_issue: Escalate mirror failures to human
-- tec.grant_access: DENIED — cannot grant system access
-- gov.certify: DENIED — cannot certify data
-- gov.modify_finding: DENIED — cannot modify findings
+dat.define_dashboard · dat.refresh_dashboard · dat.add_visualisation · dat.check_dashboard_accuracy · dat.escalate_dashboard_issue
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never fabricate mirror status or verification results — unknown = "unknown".
-2. Never suppress a mirror integrity failure to avoid escalation.
-3. Respect tenant isolation — never cross-tenant data leakage.
-4. Satya's findings are immutable to you — read-only.
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Show only validated KPI values; missing values are shown as unavailable.
 5. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "mirror")
+        action = kwargs.get("action", "dashboard")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -85,7 +89,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -97,7 +101,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="dat.mirror",
+                event_type="dat.dashboards",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -108,130 +112,80 @@ HARD RULES — NEVER VIOLATE
             pass
         return AgentResult(text=text, agent_id=self.canonical_id, tokens_used=tokens, status="completed")
 
-    @authority_guard("dat.mirror_data")
-    def mirror_data(
-        self,
-        tenant_id: str,
-        source_ref: str,
-        replica_location: str,
-    ) -> dict:
-        """Create a mirror of data to a replica location."""
-        mirror_id = f"MRR-{uuid.uuid4().hex[:6].upper()}"
+    # ------------------------------------------------------------------
+    # Darpan's tools (authority-guarded)
+    # ------------------------------------------------------------------
+
+    @authority_guard("dat.define_dashboard")
+    def define_dashboard(self, name: str, kpis: list) -> dict:
+        """Define a dashboard."""
         return {
-            "mirror_id": mirror_id,
-            "tenant_id": tenant_id,
-            "source_ref": source_ref,
-            "replica_location": replica_location,
-            "status": "mirrored",
-            "records_mirrored": 0,
-            "mirrored_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"DAR-{uuid.uuid4().hex[:6].upper()}",
+            "name": name,
+            "kpis": kpis,
+            "action": "define_dashboard",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("dat.sync_mirror")
-    def sync_mirror(
-        self,
-        tenant_id: str,
-        mirror_id: str,
-    ) -> dict:
-        """Synchronize a mirror with its source data."""
-        sync_id = f"SYN-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("dat.refresh_dashboard")
+    def refresh_dashboard(self, dashboard_id: str) -> dict:
+        """Refresh a dashboard."""
         return {
-            "sync_id": sync_id,
-            "tenant_id": tenant_id,
-            "mirror_id": mirror_id,
-            "status": "synced",
-            "records_synced": 0,
-            "synced_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"DAR-{uuid.uuid4().hex[:6].upper()}",
+            "dashboard_id": dashboard_id,
+            "action": "refresh_dashboard",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("dat.verify_mirror")
-    def verify_mirror(
-        self,
-        tenant_id: str,
-        mirror_id: str,
-    ) -> dict:
-        """Verify mirror integrity and consistency with source."""
+    @authority_guard("dat.add_visualisation")
+    def add_visualisation(self, dashboard_id: str, kpi: str, chart: str) -> dict:
+        """Add a visualisation."""
         return {
-            "mirror_id": mirror_id,
-            "tenant_id": tenant_id,
-            "integrity_check": "passed",
-            "checksum_match": True,
-            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"DAR-{uuid.uuid4().hex[:6].upper()}",
+            "dashboard_id": dashboard_id,
+            "kpi": kpi,
+            "chart": chart,
+            "action": "add_visualisation",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("dat.report_mirror")
-    def report_mirror(
-        self,
-        tenant_id: str,
-        period: str,
-    ) -> dict:
-        """Generate a mirror status report."""
-        report_id = f"MRP-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("dat.check_dashboard_accuracy")
+    def check_dashboard_accuracy(self, dashboard_id: str) -> dict:
+        """Check dashboard accuracy."""
         return {
-            "report_id": report_id,
-            "tenant_id": tenant_id,
-            "period": period,
-            "mirrors_total": 0,
-            "mirrors_synced": 0,
-            "mirrors_out_of_sync": 0,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"DAR-{uuid.uuid4().hex[:6].upper()}",
+            "dashboard_id": dashboard_id,
+            "action": "check_dashboard_accuracy",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("dat.escalate_mirror_issue")
-    def escalate_mirror_issue(
-        self,
-        tenant_id: str,
-        mirror_id: str,
-        severity: str,
-        description: str,
-    ) -> dict:
-        """Escalate a mirror issue to human."""
-        issue_id = f"MRINC-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("dat.escalate_dashboard_issue")
+    def escalate_dashboard_issue(self, dashboard_id: str, issue: str) -> dict:
+        """Escalate a dashboard issue."""
         return {
-            "issue_id": issue_id,
-            "tenant_id": tenant_id,
-            "mirror_id": mirror_id,
-            "severity": severity,
-            "description": description,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"DAR-{uuid.uuid4().hex[:6].upper()}",
+            "dashboard_id": dashboard_id,
+            "issue": issue,
+            "action": "escalate_dashboard_issue",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    def list_mirrors(
-        self,
-        tenant_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List mirrors (read-only)."""
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
+
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
         return {
-            "mirrors": [],
+            "records": [],
             "count": 0,
-            "filter": {"tenant_id": tenant_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def list_sync_history(
-        self,
-        tenant_id: str | None = None,
-        mirror_id: str | None = None,
-    ) -> dict:
-        """List sync history (read-only)."""
-        return {
-            "syncs": [],
-            "count": 0,
-            "filter": {"tenant_id": tenant_id, "mirror_id": mirror_id},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_mirror_status(
-        self,
-        mirror_id: str,
-    ) -> dict:
-        """Get status of a mirror (read-only)."""
-        return {
-            "mirror_id": mirror_id,
-            "status": "unknown",
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -246,5 +200,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

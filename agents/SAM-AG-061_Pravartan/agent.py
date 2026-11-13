@@ -1,7 +1,12 @@
-"""Pravartan — Work Execution Agent (SAM-AG-061 · OPS-004).
+"""Pravartan — Workflow Orchestration Lead (SAM-AG-061 · OPS-004).
 
-Phase 3 operations agent. Executes work, assigns tasks, tracks execution,
-and completes work. Reports to Daksh (SAM-AG-002, AI COO).
+Stage 2 Phase 3 operations, client, analytics and CEO-office agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Orchestrate multi-agent workflows: set the handoff order, start the pipeline (Pravahika
+runs it technically), keep execution contracts between steps and handle workflow
+exceptions. [PDF 01A.05 · OPS-004 Workflow Orchestration & Automation Lead; process
+OPS-P11]
+Reports to Daksh (AI COO, SAM-AG-002).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -13,63 +18,71 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Pravartan(BaseAgent):
-    """Work Execution Agent."""
+    """Workflow Orchestration Lead."""
 
     canonical_id = "SAM-AG-061"
     name = "Pravartan"
-    designation = "Work Execution Agent"
+    designation = "Workflow Orchestration Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
-        "ops.execute_work": True,
-        "ops.assign_tasks": True,
-        "ops.track_execution": True,
-        "ops.complete_work": True,
-        "ops.escalate_execution_issue": True,
+        "ops.define_handoff_order": True,
+        "ops.start_workflow": True,
+        "ops.record_execution_contract": True,
+        "ops.handle_workflow_exception": True,
+        "ops.escalate_workflow_failure": True,
         "gov.certify": False,
         "gov.modify_finding": False,
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Pravartan, the Work Execution Agent (SAM-AG-061 · OPS-004) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "define_handoff_order": "ops.define_handoff_order",
+        "start_workflow": "ops.start_workflow",
+        "record_execution_contract": "ops.record_execution_contract",
+        "handle_workflow_exception": "ops.handle_workflow_exception",
+        "escalate_workflow_failure": "ops.escalate_workflow_failure",
+    }
+
+    SYSTEM_PROMPT = """You are Pravartan, Workflow Orchestration Lead (SAM-AG-061 · OPS-004) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-061 · Position: OPS-004
+- Canonical ID: SAM-AG-061 · Position: OPS-004 · Department: Operations & Delivery Management
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
-  Satya does NOT report to you and you cannot alter Satya's findings.
 
 YOUR MISSION
-Execute work, assign tasks, track execution progress, and complete work.
-Every assigned task moves through execution to closure with evidence.
+Orchestrate multi-agent workflows: set the handoff order, start the pipeline (Pravahika runs it
+technically), keep execution contracts between steps and handle workflow exceptions. [PDF 01A.05
+· OPS-004 Workflow Orchestration & Automation Lead; process OPS-P11]
 
 YOUR REGISTERS
-1. Execution Register — active executions, owners, progress
-2. Task Assignment Register — assignments, owners, deadlines
-3. Execution Tracking Register — progress, milestones, blockers
-4. Work Completion Register — completed work, evidence, sign-off
-5. Execution Issue Register — issues, escalations, resolutions
+1. Workflow Register — workflow, steps, status
+2. Execution Contract Register — step, input, output, owner
+3. Workflow Exception Register — exception, step, resolution
 
 AUTHORITY MATRIX
-ops.execute_work · ops.assign_tasks · ops.track_execution · ops.complete_work
-ops.escalate_execution_issue · gov.certify=False · gov.modify_finding=False
-tec.grant_access=False
+ops.define_handoff_order · ops.start_workflow · ops.record_execution_contract · ops.handle_workflow_exception · ops.escalate_workflow_failure
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never fabricate execution progress — missing data = "unavailable".
-2. Never suppress an execution failure or claim completion without evidence.
-3. Never change commercial terms — route to human.
-4. Respect tenant isolation — never cross-tenant data leakage.
-5. Satya's findings are immutable to you — read-only.
-6. Every completed task has closure evidence.
-7. If the local model is down, report it honestly — do not fake output."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Never skip a required quality or approval step in a workflow.
+5. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "execute")
+        action = kwargs.get("action", "orchestrate")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -80,7 +93,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -92,7 +105,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="ops.execute",
+                event_type="ops.orchestration",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -103,128 +116,80 @@ HARD RULES — NEVER VIOLATE
             pass
         return AgentResult(text=text, agent_id=self.canonical_id, tokens_used=tokens, status="completed")
 
-    @authority_guard("ops.execute_work")
-    def execute_work(
-        self,
-        task_id: str,
-        assigned_agent: str,
-        execution_plan: dict,
-    ) -> dict:
-        """Execute a work task."""
-        exec_id = f"EXEC-{uuid.uuid4().hex[:6].upper()}"
+    # ------------------------------------------------------------------
+    # Pravartan's tools (authority-guarded)
+    # ------------------------------------------------------------------
+
+    @authority_guard("ops.define_handoff_order")
+    def define_handoff_order(self, workflow_ref: str, steps: list) -> dict:
+        """Define the handoff order of steps."""
+        ordered = [{"position": i + 1, "step": s} for i, s in enumerate(steps or [])]
         return {
-            "execution_id": exec_id,
-            "task_id": task_id,
-            "assigned_agent": assigned_agent,
-            "execution_plan": execution_plan,
-            "status": "executing",
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "workflow_ref": workflow_ref,
+            "handoff_order": ordered,
+            "status": "defined" if ordered else "empty",
+            "defined_at": _now(),
         }
 
-    @authority_guard("ops.assign_tasks")
-    def assign_tasks(
-        self,
-        task_id: str,
-        assigned_agent: str,
-        deadline: str,
-    ) -> dict:
-        """Assign a task to an agent."""
-        assignment_id = f"ASSIGN-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.start_workflow")
+    def start_workflow(self, workflow_ref: str) -> dict:
+        """Start a workflow."""
         return {
-            "assignment_id": assignment_id,
-            "task_id": task_id,
-            "assigned_agent": assigned_agent,
-            "deadline": deadline,
-            "status": "assigned",
-            "assigned_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PRA-{uuid.uuid4().hex[:6].upper()}",
+            "workflow_ref": workflow_ref,
+            "action": "start_workflow",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.track_execution")
-    def track_execution(
-        self,
-        execution_id: str,
-        progress: float,
-        status: str,
-    ) -> dict:
-        """Track execution progress."""
+    @authority_guard("ops.record_execution_contract")
+    def record_execution_contract(self, step: str, inputs: list, outputs: list) -> dict:
+        """Record a step's input/output contract."""
         return {
-            "execution_id": execution_id,
-            "progress": progress,
-            "status": status,
-            "tracked_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PRA-{uuid.uuid4().hex[:6].upper()}",
+            "step": step,
+            "inputs": inputs,
+            "outputs": outputs,
+            "action": "record_execution_contract",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.complete_work")
-    def complete_work(
-        self,
-        execution_id: str,
-        evidence: str,
-        closure_notes: str,
-    ) -> dict:
-        """Complete a work execution with evidence."""
+    @authority_guard("ops.handle_workflow_exception")
+    def handle_workflow_exception(self, workflow_ref: str, exception: str) -> dict:
+        """Handle a workflow exception."""
         return {
-            "execution_id": execution_id,
-            "evidence": evidence,
-            "closure_notes": closure_notes,
-            "status": "completed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PRA-{uuid.uuid4().hex[:6].upper()}",
+            "workflow_ref": workflow_ref,
+            "exception": exception,
+            "action": "handle_workflow_exception",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.escalate_execution_issue")
-    def escalate_execution_issue(
-        self,
-        issue_type: str,
-        description: str,
-        severity: str,
-        affected_executions: list,
-    ) -> dict:
-        """Escalate an execution issue to human Board."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.escalate_workflow_failure")
+    def escalate_workflow_failure(self, workflow_ref: str, reason: str) -> dict:
+        """Escalate a workflow failure."""
         return {
-            "incident_id": incident_id,
-            "issue_type": issue_type,
-            "description": description,
-            "severity": severity,
-            "affected_executions": affected_executions,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PRA-{uuid.uuid4().hex[:6].upper()}",
+            "workflow_ref": workflow_ref,
+            "reason": reason,
+            "action": "escalate_workflow_failure",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    def list_executions(
-        self,
-        status: str | None = None,
-    ) -> dict:
-        """List executions (read-only)."""
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
+
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
         return {
-            "executions": [],
+            "records": [],
             "count": 0,
-            "filter": {"status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def list_assignments(
-        self,
-        agent_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List task assignments (read-only)."""
-        return {
-            "assignments": [],
-            "count": 0,
-            "filter": {"agent_id": agent_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_execution_status(
-        self,
-        execution_id: str | None = None,
-    ) -> dict:
-        """Get execution status (read-only)."""
-        return {
-            "executions": [],
-            "count": 0,
-            "filter": {"execution_id": execution_id},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -239,5 +204,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

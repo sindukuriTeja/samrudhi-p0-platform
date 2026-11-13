@@ -20,7 +20,7 @@ class Smriti(BaseAgent):
 
     canonical_id = "SAM-AG-049"
     name = "Smriti"
-    designation = "Content Knowledge Agent"
+    designation = "Client Knowledge"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,12 +34,12 @@ class Smriti(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Smriti, the Content Knowledge Agent (SAM-AG-049 · CRT-027) of Samrudhi,
+    SYSTEM_PROMPT = """You are Smriti, Client Knowledge (SAM-AG-049 · CEX-007) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-049 · Position: CRT-027
-- You report to Aarya (AI CCO, SAM-AG-003).
+- Canonical ID: SAM-AG-049 · Position: CEX-007
+- You report to Mitra (AI CXO, SAM-AG-004).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
 YOUR MISSION
@@ -76,7 +76,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -149,6 +149,39 @@ HARD RULES — NEVER VIOLATE
             "context": {},
             "queried_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @authority_guard("crt.retrieve_context")
+    def load_client_context(
+        self,
+        client_id: str,
+        profile: dict | None = None,
+        rules: dict | None = None,
+    ) -> dict:
+        """Load ONLY the approved client facts (client knowledge store) and the client's rules.
+
+        profile: the client's row from client_profiles, or None. Nothing is invented: when there
+        is no approved profile the context is refused with the reason, and a person must add or
+        approve the profile (Knowledge page) before the project can continue.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        rules = rules or {}
+        base = {"client_id": client_id, "forbidden_claims": list(rules.get("forbidden_claims") or []),
+                "required_disclaimers": list(rules.get("required_disclaimers") or []), "loaded_at": now}
+        if not profile:
+            return {**base, "status": "missing", "reasons": [
+                f"No client profile exists for {client_id}. Add it on the Knowledge page and have "
+                "a second person approve it, then press Retry."]}
+        if profile.get("status") != "approved":
+            return {**base, "status": "not_approved", "reasons": [
+                f"The client profile for {client_id} (version {profile.get('version')}) is not approved. "
+                "A second signed-in person must approve it on the Knowledge page, then press Retry."]}
+        fields = {"brand_voice": profile.get("brand_voice") or "", "audience": profile.get("audience") or "",
+                  "services": list(profile.get("services") or []), "locations": list(profile.get("locations") or []),
+                  "key_messages": list(profile.get("key_messages") or [])}
+        unavailable = [k for k, v in fields.items() if not v]
+        return {**base, "status": "loaded", "client_name": profile.get("name"), **fields,
+                "unavailable": unavailable, "profile_version": profile.get("version"),
+                "approved_by": profile.get("approved_by"), "approved_at": profile.get("approved_at")}
 
     @authority_guard("crt.update_brand_context")
     def update_brand_context(

@@ -1,7 +1,11 @@
-"""Disha — Content Localization Agent (SAM-AG-076).
+"""Disha — Content Strategy & Research Lead (SAM-AG-076 · CRT-002).
 
-Phase 2 content pilot agent. Owns content localization under Aarya:
-adapts content for regional languages, cultural contexts, and local compliance.
+Stage 2 Phase 2 content-pilot agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Set the client content strategy: audience positioning, content pillars, themes, tone and
+key messages, and choose healthcare topics using Anvesh's verified research. [PDF 01A.06
+· CRT-002 Content Strategy & Research Lead; processes CRT-P02, CRT-P03]
+Reports to Aarya (AI CCO, SAM-AG-003).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -13,57 +17,72 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Disha(BaseAgent):
-    """Content Localization Agent."""
+    """Content Strategy & Research Lead."""
 
     canonical_id = "SAM-AG-076"
     name = "Disha"
-    designation = "Content Localization Agent"
+    designation = "Content Strategy & Research Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
-        "crt.localize_content": True,
-        "crt.adapt_culture": True,
-        "crt.check_local_compliance": True,
-        "crt.translate": True,
-        "crt.escalate_localization": True,
-        "tec.grant_access": False,
+        "crt.define_content_pillars": True,
+        "crt.analyse_audience": True,
+        "crt.set_key_messages": True,
+        "crt.select_topics": True,
+        "crt.escalate_strategy_conflict": True,
         "gov.certify": False,
         "gov.modify_finding": False,
+        "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Disha, the Content Localization Agent (SAM-AG-076 · CRT-022) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "define_content_pillars": "crt.define_content_pillars",
+        "analyse_audience": "crt.analyse_audience",
+        "set_key_messages": "crt.set_key_messages",
+        "select_topics": "crt.select_topics",
+        "escalate_strategy_conflict": "crt.escalate_strategy_conflict",
+    }
+
+    SYSTEM_PROMPT = """You are Disha, Content Strategy & Research Lead (SAM-AG-076 · CRT-002) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-076 · Position: CRT-022
+- Canonical ID: SAM-AG-076 · Position: CRT-002 · Department: Creative, Content & Social Media
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
 YOUR MISSION
-Own content localization. Adapt content for regional languages, cultural
-contexts, and local compliance. Ensure localized content maintains brand
-voice and healthcare compliance. Never fabricate localization data.
+Set the client content strategy: audience positioning, content pillars, themes, tone and key
+messages, and choose healthcare topics using Anvesh's verified research. [PDF 01A.06 · CRT-002
+Content Strategy & Research Lead; processes CRT-P02, CRT-P03]
 
 YOUR REGISTERS
-1. Localization Brief Register — localization requests, languages, deadlines
-2. Localized Content Register — translations, adaptations, versions
-3. Cultural Context Register — cultural norms, sensitivities per region
-4. Local Compliance Register — regional regulations, requirements
-5. Localization Escalation Register — blockers, escalations
+1. Content Strategy Register — client, pillars, audience, tone, version
+2. Key Message Register — message, pillar, evidence
+3. Topic Register — topic, source, status
+
+AUTHORITY MATRIX
+crt.define_content_pillars · crt.analyse_audience · crt.set_key_messages · crt.select_topics · crt.escalate_strategy_conflict
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never publish localized content without approval.
-2. Never fabricate translations or cultural adaptations. Missing = "unavailable".
-3. Never suppress a cultural sensitivity or local compliance issue.
-4. Localized content must maintain brand voice and healthcare compliance.
-5. Respect tenant isolation.
-6. If the local model is down, report it honestly."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Never build messages on unverified health claims.
+5. Healthcare clients: no cure claims or guarantees.
+6. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "localize")
+        action = kwargs.get("action", "strategy")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -74,7 +93,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -86,7 +105,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="crt.localization",
+                event_type="crt.strategy",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -97,117 +116,81 @@ HARD RULES — NEVER VIOLATE
             pass
         return AgentResult(text=text, agent_id=self.canonical_id, tokens_used=tokens, status="completed")
 
-    @authority_guard("crt.localize_content")
-    def localize_content(
-        self,
-        client_id: str,
-        content_ref: str,
-        target_languages: list,
-        brief: dict,
-    ) -> dict:
-        """Localize content for target languages."""
-        localization_id = f"LOC-{uuid.uuid4().hex[:6].upper()}"
+    # ------------------------------------------------------------------
+    # Disha's tools (authority-guarded)
+    # ------------------------------------------------------------------
+
+    @authority_guard("crt.define_content_pillars")
+    def define_content_pillars(self, client_id: str, pillars: list) -> dict:
+        """Define content pillars."""
         return {
-            "localization_id": localization_id,
+            "record_id": f"DIS-{uuid.uuid4().hex[:6].upper()}",
             "client_id": client_id,
-            "content_ref": content_ref,
-            "target_languages": target_languages,
-            "brief": brief,
-            "status": "in_progress",
-            "localized_at": datetime.now(timezone.utc).isoformat(),
+            "pillars": pillars,
+            "action": "define_content_pillars",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("crt.adapt_culture")
-    def adapt_culture(
-        self,
-        content_ref: str,
-        region: str,
-        cultural_context: dict,
-    ) -> dict:
-        """Adapt content for cultural context."""
+    @authority_guard("crt.analyse_audience")
+    def analyse_audience(self, client_id: str, audience: str) -> dict:
+        """Analyse the audience."""
         return {
-            "content_ref": content_ref,
-            "region": region,
-            "cultural_context": cultural_context,
-            "adapted": True,
-            "adapted_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    @authority_guard("crt.check_local_compliance")
-    def check_local_compliance(
-        self,
-        content_ref: str,
-        region: str,
-        local_rules: dict,
-    ) -> dict:
-        """Check localized content for local compliance."""
-        violations = []
-        return {
-            "content_ref": content_ref,
-            "region": region,
-            "compliant": len(violations) == 0,
-            "violations": violations,
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    @authority_guard("crt.translate")
-    def translate_content(
-        self,
-        content_ref: str,
-        source_lang: str,
-        target_lang: str,
-    ) -> dict:
-        """Translate content to target language."""
-        translation_id = f"TRN-{uuid.uuid4().hex[:6].upper()}"
-        return {
-            "translation_id": translation_id,
-            "content_ref": content_ref,
-            "source_lang": source_lang,
-            "target_lang": target_lang,
-            "translated": True,
-            "translated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    @authority_guard("crt.escalate_localization")
-    def escalate_localization_issue(
-        self,
-        client_id: str,
-        severity: str,
-        description: str,
-    ) -> dict:
-        """Escalate a localization issue."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
-        return {
-            "incident_id": incident_id,
+            "record_id": f"DIS-{uuid.uuid4().hex[:6].upper()}",
             "client_id": client_id,
-            "severity": severity,
-            "description": description,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
+            "audience": audience,
+            "action": "analyse_audience",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    def list_localizations(
-        self,
-        client_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List localization items (read-only)."""
+    @authority_guard("crt.set_key_messages")
+    def set_key_messages(self, client_id: str, messages: list) -> dict:
+        """Set the key messages."""
         return {
-            "localizations": [],
+            "record_id": f"DIS-{uuid.uuid4().hex[:6].upper()}",
+            "client_id": client_id,
+            "messages": messages,
+            "action": "set_key_messages",
+            "status": "recorded",
+            "recorded_at": _now(),
+        }
+
+    @authority_guard("crt.select_topics")
+    def select_topics(self, client_id: str, topics: list) -> dict:
+        """Select healthcare topics."""
+        return {
+            "record_id": f"DIS-{uuid.uuid4().hex[:6].upper()}",
+            "client_id": client_id,
+            "topics": topics,
+            "action": "select_topics",
+            "status": "recorded",
+            "recorded_at": _now(),
+        }
+
+    @authority_guard("crt.escalate_strategy_conflict")
+    def escalate_strategy_conflict(self, client_id: str, conflict: str) -> dict:
+        """Escalate a strategy conflict."""
+        return {
+            "record_id": f"DIS-{uuid.uuid4().hex[:6].upper()}",
+            "client_id": client_id,
+            "conflict": conflict,
+            "action": "escalate_strategy_conflict",
+            "status": "recorded",
+            "recorded_at": _now(),
+        }
+
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
+
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
+        return {
+            "records": [],
             "count": 0,
-            "filter": {"client_id": client_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_cultural_context(
-        self,
-        region: str,
-    ) -> dict:
-        """Get cultural context for a region (read-only)."""
-        return {
-            "region": region,
-            "context": {},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -222,5 +205,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

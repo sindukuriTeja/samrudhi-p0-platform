@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Samrudhi Control Room</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f1f3f6; --border: #e2e5ea;
+    --text: #15181d; --muted: #616a77; --accent: #4f46e5; --accent-ink: #ffffff;
+    --ok: #15803d; --ok-bg: #dcfce7; --warn: #a16207; --warn-bg: #fef3c7;
+    --bad: #b91c1c; --bad-bg: #fee2e2; --info: #1d4ed8; --info-bg: #dbeafe;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116; --panel: #161a21; --panel-2: #1d222b; --border: #2a303b;
+      --text: #e6e9ef; --muted: #9aa3b2; --accent: #818cf8; --accent-ink: #0e1116;
+      --ok: #4ade80; --ok-bg: #14301f; --warn: #fbbf24; --warn-bg: #3a2c0b;
+      --bad: #f87171; --bad-bg: #3b1416; --info: #93c5fd; --info-bg: #142a4a;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel);
+    border-bottom: 1px solid var(--border); }
+  .bar { max-width: 1280px; margin: 0 auto; padding: 12px 20px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .brand { font-weight: 650; font-size: 16px; letter-spacing: -.01em; }
+  .brand small { color: var(--muted); font-weight: 500; margin-left: 6px; }
+  .health { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+    border-radius: 999px; font-size: 12px; font-weight: 550; background: var(--panel-2);
+    border: 1px solid var(--border); white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); }
+  .user { display: flex; align-items: center; gap: 8px; }
+  .btn { border: 1px solid var(--border); background: var(--panel); padding: 6px 12px;
+    border-radius: 8px; cursor: pointer; font-weight: 550; }
+  .btn:hover { background: var(--panel-2); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; box-shadow: var(--shadow); cursor: pointer; text-align: left; }
+  .card.active { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .card .k { color: var(--muted); font-size: 12px; font-weight: 550; }
+  .card .v { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .card .s { color: var(--muted); font-size: 12px; }
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .filters input, .filters select { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; }
+  .filters input { flex: 1 1 220px; min-width: 0; }
+  .count { color: var(--muted); font-size: 13px; margin-left: auto; }
+  .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    overflow: auto; box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; min-width: 760px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; background: var(--panel-2);
+    position: sticky; top: 0; cursor: pointer; user-select: none; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--panel-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; color: var(--muted); }
+  .name { font-weight: 600; }
+  .desig { color: var(--muted); }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 550;
+    background: var(--panel-2); border: 1px solid var(--border); }
+  .st { display: inline-flex; align-items: center; gap: 6px; font-weight: 550; font-size: 12.5px;
+    padding: 2px 9px; border-radius: 999px; }
+  .st-proposed, .st-registered, .st-configured { background: var(--panel-2); color: var(--muted); }
+  .st-evaluated, .st-approved { background: var(--info-bg); color: var(--info); }
+  .st-active, .st-monitored { background: var(--ok-bg); color: var(--ok); }
+  .st-restricted { background: var(--warn-bg); color: var(--warn); }
+  .st-retired { background: var(--bad-bg); color: var(--bad); }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  /* Drawer */
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; z-index: 10; }
+  .scrim.open { display: block; }
+  aside { position: fixed; top: 0; right: 0; height: 100%; width: min(460px, 100%);
+    background: var(--panel); border-left: 1px solid var(--border); z-index: 11;
+    transform: translateX(100%); transition: transform .18s ease; overflow-y: auto; }
+  aside.open { transform: none; }
+  .drawer-head { padding: 18px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: flex-start; }
+  .drawer-head h2 { margin: 0; font-size: 18px; }
+  .drawer-body { padding: 18px 20px; display: grid; gap: 18px; }
+  dl { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; margin: 0; }
+  dt { color: var(--muted); } dd { margin: 0; font-weight: 550; }
+  h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .box { border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: var(--panel-2); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row select, .row input { flex: 1 1 140px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; min-width: 0; }
+  .checks { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; }
+  .checks li { display: flex; gap: 8px; align-items: baseline; }
+  .msg { font-size: 13px; margin-top: 10px; }
+  .msg.ok { color: var(--ok); } .msg.bad { color: var(--bad); }
+  .hint { color: var(--muted); font-size: 12.5px; }
+  .x { margin-left: auto; border: 0; background: transparent; font-size: 22px; line-height: 1; cursor: pointer; color: var(--muted); }
+  /* Login dialog */
+  dialog { border: 1px solid var(--border); border-radius: 14px; padding: 0; background: var(--panel);
+    color: var(--text); width: min(380px, calc(100% - 32px)); }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog form { padding: 20px; display: grid; gap: 12px; }
+  dialog h2 { margin: 0; font-size: 17px; }
+  dialog label { display: grid; gap: 4px; font-weight: 550; font-size: 13px; }
+  dialog input, dialog select { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text);
+    color: var(--bg); padding: 10px 16px; border-radius: 10px; font-weight: 550; z-index: 20; display: none; }
+  @media (max-width: 640px) {
+    .bar, main { padding-left: 16px; padding-right: 16px; }
+    .health { margin-left: 0; order: 3; width: 100%; }
+    dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 8px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">Samrudhi Control Room <small>P0 platform</small></div>
+    <a class="btn" href="/" id="new-ui-link" hidden>← New Control Room</a>
+    <div class="health" id="health"><span class="pill"><span class="dot"></span>Checking backend…</span></div>
+    <div class="user" id="user"></div>
+  </div>
+</header>
+
+<main>
+  <div class="cards" id="cards"></div>
+
+  <div class="filters">
+    <input id="q" type="search" placeholder="Search name, ID or designation">
+    <select id="f-stage"><option value="">All stages</option></select>
+    <select id="f-status"><option value="">All statuses</option></select>
+    <select id="f-priority"><option value="">All priorities</option></select>
+    <select id="f-type"><option value="">All types</option></select>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="canonical_id">ID</th>
+          <th data-sort="name">Agent</th>
+          <th data-sort="department">Department</th>
+          <th data-sort="stage">Stage</th>
+          <th data-sort="priority">Priority</th>
+          <th data-sort="agent_type">Type</th>
+          <th data-sort="current_level">Level</th>
+          <th data-sort="status">Status</th>
+        </tr>
+      </thead>
+      <tbody id="rows"><tr><td colspan="8" class="empty">Loading agents…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<aside id="drawer" aria-hidden="true"></aside>
+
+<dialog id="login">
+  <form method="dialog" id="login-form">
+    <h2>Sign in</h2>
+    <p class="hint" style="margin:0">Lifecycle actions need the <b>founder</b> or <b>assurance_lead</b> role.
+      Demo users and their password are defined in <code>backend/core/auth.py</code>.</p>
+    <label>Username
+      <select name="username">
+        <option value="vikram">vikram (founder)</option>
+        <option value="satya_human">satya_human (assurance lead)</option>
+        <option value="divya">divya (client experience lead)</option>
+      </select>
+    </label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <div class="msg bad" id="login-err"></div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" id="login-submit" value="default">Sign in</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = (new URLSearchParams(location.search).get('api')) ||
+  (location.protocol.startsWith('http') && location.port !== '5173' ? location.origin : 'http://localhost:8000');
+const STATES = ['proposed','registered','configured','evaluated','approved','active','monitored','restricted','retired'];
+const STAGE_LABEL = {
+  'P0-1A': 'Stage 1A · Core', 'P0-1B': 'Stage 1B · Tech services', 'P0-1C': 'Stage 1C · Assurance',
+  'P1-P1': 'Phase 1 · Leadership', 'P1-P2': 'Phase 2 · Content', 'P1-P3': 'Phase 3 · Ops & data'
+};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let agents = [];
+let sortKey = 'canonical_id', sortDir = 1;
+let auth = null;
+try { auth = JSON.parse(sessionStorage.getItem('samrudhi-auth') || 'null'); } catch (e) { auth = null; }
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = 'none', 2600);
+}
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {});
+  if (auth && auth.token) headers.Authorization = 'Bearer ' + auth.token;
+  const res = await fetch(API + path, Object.assign({}, opts, { headers }));
+  let body = null;
+  try { body = await res.json(); } catch (e) { body = null; }
+  if (res.status === 401 && auth) { setAuth(null); }
+  if (!res.ok) {
+    const err = new Error((body && body.detail) || res.statusText || 'Request failed');
+    err.status = res.status; err.headers = res.headers; throw err;
+  }
+  return body;
+}
+
+/* ---------- Health ---------- */
+async function loadHealth() {
+  const el = $('#health');
+  try {
+    const h = await api('/api/health');
+    const o = h.ollama || {};
+    const ollamaOk = o.status === 'healthy' && o.configured_model_present !== false;
+    el.innerHTML = [
+      pill('API', 'ok', 'up'),
+      pill('Database', h.db === 'up' ? 'ok' : 'bad', h.db),
+      pill('Redis', String(h.redis).startsWith('up') ? 'ok' : 'warn', String(h.redis).startsWith('up') ? 'up' : 'off'),
+      pill('Ollama', ollamaOk ? 'ok' : 'bad', ollamaOk ? (o.model || 'up') : (o.status || 'down')),
+    ].join('');
+  } catch (e) {
+    el.innerHTML = pill('API', 'bad', 'unreachable at ' + API);
+  }
+}
+const pill = (k, cls, v) => `<span class="pill"><span class="dot ${cls}"></span>${esc(k)}: ${esc(v)}</span>`;
+
+/* ---------- Auth ---------- */
+function setAuth(a) {
+  auth = a;
+  try { a ? sessionStorage.setItem('samrudhi-auth', JSON.stringify(a)) : sessionStorage.removeItem('samrudhi-auth'); } catch (e) {}
+  renderUser();
+  if (openId) openDrawer(openId);
+}
+function renderUser() {
+  const u = $('#user');
+  if (auth) {
+    u.innerHTML = `<span class="pill">${esc(auth.username)} · ${esc(auth.role)}</span><button class="btn" id="logout">Sign out</button>`;
+    $('#logout').onclick = () => { setAuth(null); toast('Signed out'); };
+  } else {
+    u.innerHTML = `<button class="btn primary" id="signin">Sign in</button>`;
+    $('#signin').onclick = openLogin;
+  }
+}
+function openLogin() { $('#login-err').textContent = ''; $('#login-form').reset(); $('#login').showModal(); }
+$('#login-form').addEventListener('submit', async (ev) => {
+  if (ev.submitter && ev.submitter.value === 'cancel') return;
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const btn = $('#login-submit'); btn.disabled = true;
+  try {
+    const body = new URLSearchParams({ username: fd.get('username'), password: fd.get('password') });
+    const res = await api('/api/auth/login', { method: 'POST', body });
+    setAuth({ token: res.access_token, role: res.role, username: fd.get('username') });
+    $('#login').close(); toast('Signed in as ' + fd.get('username'));
+  } catch (e) {
+    $('#login-err').textContent = e.message;
+  } finally { btn.disabled = false; }
+});
+
+/* ---------- Agents ---------- */
+async function loadAgents() {
+  try {
+    agents = await api('/api/agents');
+    fillFilters(); render();
+  } catch (e) {
+    $('#rows').innerHTML = `<tr><td colspan="8" class="empty">Could not load agents: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function uniq(key) { return [...new Set(agents.map(a => a[key]))].sort(); }
+function fillFilters() {
+  const fill = (id, vals, label = v => v) => {
+    const sel = $(id), cur = sel.value;
+    sel.length = 1;
+    vals.forEach(v => sel.add(new Option(label(v), v)));
+    sel.value = vals.includes(cur) ? cur : '';
+  };
+  fill('#f-stage', uniq('stage'), v => STAGE_LABEL[v] || v);
+  fill('#f-status', STATES.filter(s => agents.some(a => a.status === s)));
+  fill('#f-priority', uniq('priority'));
+  fill('#f-type', uniq('agent_type'));
+}
+
+function filtered() {
+  const q = $('#q').value.trim().toLowerCase();
+  const st = $('#f-stage').value, ss = $('#f-status').value, sp = $('#f-priority').value, sty = $('#f-type').value;
+  return agents.filter(a =>
+    (!st || a.stage === st) && (!ss || a.status === ss) && (!sp || a.priority === sp) && (!sty || a.agent_type === sty) &&
+    (!q || [a.canonical_id, a.name, a.designation, a.department].join(' ').toLowerCase().includes(q))
+  ).sort((x, y) => String(x[sortKey]).localeCompare(String(y[sortKey]), undefined, { numeric: true }) * sortDir);
+}
+
+function render() {
+  // Stage cards
+  const stages = uniq('stage');
+  const activeStage = $('#f-stage').value;
+  $('#cards').innerHTML =
+    card('', 'All agents', agents.length, `${agents.filter(a => a.status === 'active').length} active`, !activeStage) +
+    stages.map(s => {
+      const list = agents.filter(a => a.stage === s);
+      return card(s, STAGE_LABEL[s] || s, list.length, `${list.filter(a => a.status === 'active').length} active`, activeStage === s);
+    }).join('');
+  document.querySelectorAll('.card').forEach(c => c.onclick = () => { $('#f-stage').value = c.dataset.stage; render(); });
+
+  const list = filtered();
+  $('#count').textContent = `${list.length} of ${agents.length} agents`;
+  $('#rows').innerHTML = list.length ? list.map(a => `
+    <tr data-id="${esc(a.canonical_id)}">
+      <td class="mono">${esc(a.canonical_id)}</td>
+      <td><div class="name">${esc(a.name)}</div><div class="desig">${esc(a.designation)}</div></td>
+      <td>${esc(a.department)}</td>
+      <td><span class="tag">${esc(a.stage)}</span></td>
+      <td>${esc(a.priority)}</td>
+      <td>${esc(a.agent_type)}</td>
+      <td class="mono">${esc(a.current_level)} → ${esc(a.target_competency)}</td>
+      <td>${statusBadge(a.status)}</td>
+    </tr>`).join('')
+    : `<tr><td colspan="8" class="empty">${agents.length ? 'No agents match these filters.' : 'No agents registered yet. Run: python -m scripts.seed_agents'}</td></tr>`;
+  document.querySelectorAll('#rows tr[data-id]').forEach(r => r.onclick = () => openDrawer(r.dataset.id));
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.textContent = th.textContent.replace(/ [▲▼]$/, '') + (th.dataset.sort === sortKey ? (sortDir > 0 ? ' ▲' : ' ▼') : '');
+  });
+}
+const card = (stage, k, v, s, active) =>
+  `<button class="card ${active ? 'active' : ''}" data-stage="${esc(stage)}"><div class="k">${esc(k)}</div><div class="v">${v}</div><div class="s">${esc(s)}</div></button>`;
+const statusBadge = s => `<span class="st st-${esc(s)}">${esc(s)}</span>`;
+
+document.querySelectorAll('th[data-sort]').forEach(th => th.onclick = () => {
+  if (sortKey === th.dataset.sort) sortDir = -sortDir; else { sortKey = th.dataset.sort; sortDir = 1; }
+  render();
+});
+['#q', '#f-stage', '#f-status', '#f-priority', '#f-type'].forEach(id => $(id).addEventListener('input', render));
+
+/* ---------- Drawer ---------- */
+let openId = null;
+async function openDrawer(id) {
+  openId = id;
+  const d = $('#drawer');
+  let a;
+  try { a = await api('/api/agents/' + encodeURIComponent(id)); }
+  catch (e) { toast(e.message); return; }
+  const canAct = auth && ['founder', 'assurance_lead'].includes(auth.role);
+  d.innerHTML = `
+    <div class="drawer-head">
+      <div>
+        <div class="mono">${esc(a.canonical_id)}</div>
+        <h2>${esc(a.name)}</h2>
+        <div class="desig">${esc(a.designation)}</div>
+      </div>
+      <button class="x" id="close" aria-label="Close">×</button>
+    </div>
+    <div class="drawer-body">
+      <dl>
+        <dt>Status</dt><dd>${statusBadge(a.status)}</dd>
+        <dt>Department</dt><dd>${esc(a.department)}</dd>
+        <dt>Stage</dt><dd>${esc(STAGE_LABEL[a.stage] || a.stage)}</dd>
+        <dt>Priority</dt><dd>${esc(a.priority)}</dd>
+        <dt>Type</dt><dd>${esc(a.agent_type)}</dd>
+        <dt>Competency</dt><dd>${esc(a.current_level)} now · target ${esc(a.target_competency)}</dd>
+        <dt>Position</dt><dd class="mono">${esc(a.position_id)}</dd>
+      </dl>
+
+      <section>
+        <h3>Activation gate</h3>
+        <div class="box">
+          <div class="hint">Runs the 5 deterministic checks required before an agent can go from proposed to active.</div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn" id="gate" ${canAct ? '' : 'disabled'}>Run gate</button>
+          </div>
+          <div id="gate-out"></div>
+        </div>
+      </section>
+
+      <section>
+        <h3>Lifecycle transition</h3>
+        <div class="box">
+          <div class="row">
+            <select id="to-state" ${canAct ? '' : 'disabled'}>
+              ${STATES.filter(s => s !== a.status).map(s => `<option value="${s}">${s}</option>`).join('')}
+            </select>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <input id="reason" placeholder="Reason (optional)" ${canAct ? '' : 'disabled'}>
+            <button class="btn primary" id="go" ${canAct ? '' : 'disabled'}>Apply</button>
+          </div>
+          <div id="tr-out"></div>
+        </div>
+      </section>
+      ${canAct ? '' : `<div class="hint">${auth ? 'Your role cannot run lifecycle actions.' : '<a href="#" id="drawer-signin">Sign in</a> as founder or assurance lead to run lifecycle actions.'}</div>`}
+    </div>`;
+  d.classList.add('open'); d.setAttribute('aria-hidden', 'false'); $('#scrim').classList.add('open');
+  $('#close').onclick = closeDrawer;
+  const ds = $('#drawer-signin'); if (ds) ds.onclick = (e) => { e.preventDefault(); openLogin(); };
+
+  $('#gate').onclick = async () => {
+    const out = $('#gate-out'); out.innerHTML = '<div class="msg">Running…</div>';
+    try {
+      const g = await api(`/api/agents/${encodeURIComponent(id)}/gate`, { method: 'POST' });
+      out.innerHTML = `
+        <div class="msg ${g.passed ? 'ok' : 'bad'}"><b>${g.passed ? 'Gate passed' : 'Gate failed'}</b></div>
+        <ul class="checks">${Object.entries(g.checks).map(([k, v]) =>
+          `<li><span class="dot ${v ? 'ok' : 'bad'}"></span>${esc(k.replace(/_/g, ' '))}</li>`).join('')}</ul>
+        ${g.failures.length ? `<div class="hint" style="margin-top:8px">${g.failures.map(esc).join('<br>')}</div>` : ''}`;
+    } catch (e) { out.innerHTML = `<div class="msg bad">${esc(e.message)}</div>`; }
+  };
+
+  $('#go').onclick = async () => {
+    const out = $('#tr-out'); out.innerHTML = '<div class="msg">Applying…</div>';
+    try {
+      const r = await api(`/api/agents/${encodeURIComponent(id)}/transition`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to_state: $('#to-state').value, reason: $('#reason').value || null })
+      });
+      toast(`${a.name} → ${r.new_state}`);
+      await loadAgents();
+      openDrawer(id);
+    } catch (e) {
+      const extra = e.headers && e.headers.get('X-Gate-Failures');
+      out.innerHTML = `<div class="msg bad">${esc(e.message)}${extra ? '<br><span class="hint">' + esc(extra) + '</span>' : ''}</div>`;
+    }
+  };
+}
+function closeDrawer() {
+  openId = null;
+  $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); $('#scrim').classList.remove('open');
+}
+$('#scrim').onclick = closeDrawer;
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && openId) closeDrawer(); });
+
+if (location.pathname.startsWith('/legacy')) { const l = document.getElementById('new-ui-link'); l.hidden = false; l.style.textDecoration = 'none'; l.style.color = 'inherit'; }
+renderUser();
+loadHealth();
+loadAgents().then(() => {
+  // /legacy/?agent=SAM-AG-001 opens that agent's detail page (used by the new Agents screen)
+  const want = new URLSearchParams(location.search).get('agent');
+  if (want) openDrawer(want);
+});
+setInterval(loadHealth, 15000);
+</script>
+</body>
+</html>

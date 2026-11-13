@@ -52,3 +52,18 @@ class Jod(BaseAgent):
     @authority_guard("tec.list_connectors")
     def list_connectors(self) -> dict:
         return dict(self._connectors)
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
+        }

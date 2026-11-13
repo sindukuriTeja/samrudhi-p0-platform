@@ -60,3 +60,18 @@ class Setubandh(BaseAgent):
     def plan_connector(self, name: str, scope: str) -> dict:
         self._connectors[name] = {"status": "planned", "type": "MCP", "scope": scope, "planned_at": datetime.now(timezone.utc).isoformat()}
         return {"connector": name, "status": "planned", "scope": scope}
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
+        }

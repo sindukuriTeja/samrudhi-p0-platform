@@ -32,6 +32,9 @@ DEMO_USERS = {
     "vikram": {"username": "vikram", "role": "founder", "password_hash": _hash_pw(_DEMO_PLAIN)},
     "divya": {"username": "divya", "role": "client_experience_lead", "password_hash": _hash_pw(_DEMO_PLAIN)},
     "satya_human": {"username": "satya_human", "role": "assurance_lead", "password_hash": _hash_pw(_DEMO_PLAIN)},
+    # An authorised contact at the demo client: may sign off that client's content at Gate 2 only.
+    "client_demo": {"username": "client_demo", "role": "client_approver", "client_id": "DEMO-HEALTHCARE-01",
+                    "password_hash": _hash_pw(_DEMO_PLAIN)},
 }
 
 
@@ -69,7 +72,10 @@ async def get_current_user(
     user = DEMO_USERS.get(username)
     if user is None:
         raise credentials_exception
-    return {"username": user["username"], "role": user["role"]}
+    out = {"username": user["username"], "role": user["role"]}
+    if user.get("client_id"):
+        out["client_id"] = user["client_id"]      # a client contact acts only for their own client
+    return out
 
 
 def require_role(*allowed_roles: str) -> Callable:

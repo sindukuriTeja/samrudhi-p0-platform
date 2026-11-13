@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # --- Ollama (local LLM) ---
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
+    # Seconds to wait for one model reply. Rework rounds carry more context, and a
+    # partly-offloaded 7B model on a small GPU can need several minutes.
+    llm_timeout_s: float = 300.0
 
     # --- PostgreSQL ---
     postgres_host: str = "localhost"

@@ -1,4 +1,4 @@
-"""Kshamata — Capacity Management Agent (SAM-AG-067 · OPS-009).
+"""Kshamata — Agent Capacity (SAM-AG-067 · OPS-010).
 
 Phase 3 operations agent. Manages capacity, tracks capacity usage, forecasts
 capacity, and reports capacity status. Reports to Daksh (SAM-AG-002, AI COO).
@@ -15,14 +15,15 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Kshamata(BaseAgent):
-    """Capacity Management Agent."""
+    """Agent Capacity."""
 
     canonical_id = "SAM-AG-067"
     name = "Kshamata"
-    designation = "Capacity Management Agent"
+    designation = "Agent Capacity"
     agent_type = "thinking"
 
     AUTHORITY = {
+        "ops.check_capacity": True,
         "ops.manage_capacity": True,
         "ops.track_capacity": True,
         "ops.forecast_capacity": True,
@@ -33,11 +34,11 @@ class Kshamata(BaseAgent):
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Kshamata, the Capacity Management Agent (SAM-AG-067 · OPS-009) of Samrudhi,
+    SYSTEM_PROMPT = """You are Kshamata, Agent Capacity (SAM-AG-067 · OPS-010) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-067 · Position: OPS-009
+- Canonical ID: SAM-AG-067 · Position: OPS-010
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
   Satya does NOT report to you and you cannot alter Satya's findings.
@@ -80,7 +81,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -246,3 +247,15 @@ HARD RULES — NEVER VIOLATE
             "status": "pending_human_approval",
             "routed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @authority_guard("ops.check_capacity")
+    def check_capacity(self, packages: list, routing: dict, max_per_agent: int = 10) -> dict:
+        """Count the planned packages per producing agent (from routing) and warn when one is over its limit."""
+        load = {}
+        for p in packages or []:
+            for agent in (routing or {}).get(p.get("type"), []):
+                load[agent] = load.get(agent, 0) + 1
+        over = {k: v for k, v in load.items() if v > max_per_agent}
+        return {"load": load, "max_per_agent": max_per_agent, "overloaded": over,
+                "status": "capacity_ok" if not over else "capacity_warning",
+                "checked_at": datetime.now(timezone.utc).isoformat()}

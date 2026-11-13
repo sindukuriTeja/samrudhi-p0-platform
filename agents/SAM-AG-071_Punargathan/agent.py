@@ -1,8 +1,11 @@
-"""Punargathan — Process Restructuring Agent (SAM-AG-071 · OPS-012).
+"""Punargathan — Rework Coordination (SAM-AG-071 · OPS-014).
 
-Phase 3 operations agent. Restructures processes, analyses processes,
-optimises processes, and reports process changes. Reports to Daksh
-(SAM-AG-002, AI COO).
+Stage 2 Phase 3 operations, client, analytics and CEO-office agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Coordinate rework: when a checker or a human sends work back, create the rework request
+with the reasons, assign it to the producing agent as a new round, count rounds and
+escalate repeated revisions. [PDF 01A.05 · OPS-014 Rework & Revision Coordination]
+Reports to Daksh (AI COO, SAM-AG-002).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -14,63 +17,71 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Punargathan(BaseAgent):
-    """Process Restructuring Agent."""
+    """Rework Coordination."""
 
     canonical_id = "SAM-AG-071"
     name = "Punargathan"
-    designation = "Process Restructuring Agent"
+    designation = "Rework Coordination"
     agent_type = "thinking"
 
     AUTHORITY = {
-        "ops.restructure_process": True,
-        "ops.analyze_process": True,
-        "ops.optimize_process": True,
-        "ops.report_process_change": True,
-        "ops.escalate_process_issue": True,
+        "ops.create_rework_request": True,
+        "ops.assign_rework": True,
+        "ops.track_revision": True,
+        "ops.close_rework": True,
+        "ops.escalate_repeat_revisions": True,
         "gov.certify": False,
         "gov.modify_finding": False,
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Punargathan, the Process Restructuring Agent (SAM-AG-071 · OPS-012) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "create_rework_request": "ops.create_rework_request",
+        "assign_rework": "ops.assign_rework",
+        "track_revision": "ops.track_revision",
+        "close_rework": "ops.close_rework",
+        "escalate_repeat_revisions": "ops.escalate_repeat_revisions",
+    }
+
+    SYSTEM_PROMPT = """You are Punargathan, Rework Coordination (SAM-AG-071 · OPS-014) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-071 · Position: OPS-012
+- Canonical ID: SAM-AG-071 · Position: OPS-014 · Department: Operations & Delivery Management
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
-  Satya does NOT report to you and you cannot alter Satya's findings.
 
 YOUR MISSION
-Restructure processes, analyse processes, optimise processes, and report
-process changes. Every restructuring action has traceable evidence and rationale.
+Coordinate rework: when a checker or a human sends work back, create the rework request with the
+reasons, assign it to the producing agent as a new round, count rounds and escalate repeated
+revisions. [PDF 01A.05 · OPS-014 Rework & Revision Coordination]
 
 YOUR REGISTERS
-1. Process Restructuring Register — restructurings, processes, changes
-2. Process Analysis Register — analyses, findings, recommendations
-3. Process Optimisation Register — optimisations, changes, results
-4. Process Change Report Register — reports, periods, summaries
-5. Process Issue Register — issues, escalations, resolutions
+1. Rework Register — item, reasons, round, assignee, status
+2. Revision Traceability Register — item, round, change, evidence
 
 AUTHORITY MATRIX
-ops.restructure_process · ops.analyze_process · ops.optimize_process
-ops.report_process_change · ops.escalate_process_issue · gov.certify=False
-gov.modify_finding=False · tec.grant_access=False
+ops.create_rework_request · ops.assign_rework · ops.track_revision · ops.close_rework · ops.escalate_repeat_revisions
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never fabricate process analysis data — missing data = "unavailable".
-2. Never suppress a process weakness or understate restructuring needs.
-3. Never change commercial terms — route to human.
-4. Respect tenant isolation — never cross-tenant data leakage.
-5. Satya's findings are immutable to you — read-only.
-6. Every process change has traceable evidence and rationale.
-7. If the local model is down, report it honestly — do not fake output."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Never overwrite an earlier round — every revision is a new round.
+5. Escalate to a human when the round limit is exceeded.
+6. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
-        action = kwargs.get("action", "restructure")
+        action = kwargs.get("action", "rework")
         context = kwargs.get("context", {})
         prompt = f"{self.SYSTEM_PROMPT}\n\nTASK: {task}\nACTION: {action}\nCONTEXT: {json.dumps(context, default=str)}"
         try:
@@ -81,7 +92,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -93,7 +104,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="ops.restructure",
+                event_type="ops.rework",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -104,130 +115,83 @@ HARD RULES — NEVER VIOLATE
             pass
         return AgentResult(text=text, agent_id=self.canonical_id, tokens_used=tokens, status="completed")
 
-    @authority_guard("ops.restructure_process")
-    def restructure_process(
-        self,
-        process_id: str,
-        changes: list,
-        rationale: str,
-    ) -> dict:
-        """Restructure a process with defined changes."""
-        restructure_id = f"RESTR-{uuid.uuid4().hex[:6].upper()}"
+    # ------------------------------------------------------------------
+    # Punargathan's tools (authority-guarded)
+    # ------------------------------------------------------------------
+
+    @authority_guard("ops.create_rework_request")
+    def create_rework_request(self, item_ref: str, reasons: list, round_no: int, max_rounds: int = 3) -> dict:
+        """Create a rework request; escalates past the round limit."""
+        escalate = round_no > max_rounds
         return {
-            "restructure_id": restructure_id,
-            "process_id": process_id,
-            "changes": changes,
-            "rationale": rationale,
-            "status": "restructured",
-            "restructured_at": datetime.now(timezone.utc).isoformat(),
+            "rework_id": f"RWK-{uuid.uuid4().hex[:6].upper()}",
+            "item_ref": item_ref,
+            "reasons": reasons,
+            "round": round_no,
+            "max_rounds": max_rounds,
+            "status": "escalate_to_human" if escalate else "rework_requested",
+            "requested_at": _now(),
         }
 
-    @authority_guard("ops.analyze_process")
-    def analyze_process(
-        self,
-        process_id: str,
-        analysis_scope: list,
-    ) -> dict:
-        """Analyse a process for improvement opportunities."""
-        analysis_id = f"ANAL-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.assign_rework")
+    def assign_rework(self, rework_id: str, agent_id: str) -> dict:
+        """Assign rework to the producing agent."""
         return {
-            "analysis_id": analysis_id,
-            "process_id": process_id,
-            "analysis_scope": analysis_scope,
-            "findings": [],
-            "status": "analysed",
-            "analysed_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PUN-{uuid.uuid4().hex[:6].upper()}",
+            "rework_id": rework_id,
+            "agent_id": agent_id,
+            "action": "assign_rework",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.optimize_process")
-    def optimize_process(
-        self,
-        process_id: str,
-        optimisations: list,
-        expected_improvement: dict,
-    ) -> dict:
-        """Optimise a process with defined improvements."""
+    @authority_guard("ops.track_revision")
+    def track_revision(self, item_ref: str, round_no: int) -> dict:
+        """Track a revision round."""
         return {
-            "process_id": process_id,
-            "optimisations": optimisations,
-            "expected_improvement": expected_improvement,
-            "status": "optimised",
-            "optimised_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PUN-{uuid.uuid4().hex[:6].upper()}",
+            "item_ref": item_ref,
+            "round_no": round_no,
+            "action": "track_revision",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.report_process_change")
-    def report_process_change(
-        self,
-        period: str,
-        process_ids: list,
-        summary: dict,
-    ) -> dict:
-        """Generate a process change report for a period."""
-        report_id = f"RPT-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.close_rework")
+    def close_rework(self, rework_id: str, evidence: str) -> dict:
+        """Close rework with evidence."""
         return {
-            "report_id": report_id,
-            "period": period,
-            "process_ids": process_ids,
-            "summary": summary,
-            "status": "generated",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PUN-{uuid.uuid4().hex[:6].upper()}",
+            "rework_id": rework_id,
+            "evidence": evidence,
+            "action": "close_rework",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.escalate_process_issue")
-    def escalate_process_issue(
-        self,
-        issue_type: str,
-        description: str,
-        severity: str,
-        affected_processes: list,
-    ) -> dict:
-        """Escalate a process issue to human Board."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.escalate_repeat_revisions")
+    def escalate_repeat_revisions(self, item_ref: str, rounds: int) -> dict:
+        """Escalate repeated revisions."""
         return {
-            "incident_id": incident_id,
-            "issue_type": issue_type,
-            "description": description,
-            "severity": severity,
-            "affected_processes": affected_processes,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
+            "record_id": f"PUN-{uuid.uuid4().hex[:6].upper()}",
+            "item_ref": item_ref,
+            "rounds": rounds,
+            "action": "escalate_repeat_revisions",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    def list_restructurings(
-        self,
-        process_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List process restructurings (read-only)."""
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
+
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
         return {
-            "restructurings": [],
+            "records": [],
             "count": 0,
-            "filter": {"process_id": process_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_process_analysis(
-        self,
-        process_id: str | None = None,
-    ) -> dict:
-        """Get process analysis records (read-only)."""
-        return {
-            "analyses": [],
-            "count": 0,
-            "filter": {"process_id": process_id},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def list_optimisations(
-        self,
-        process_id: str | None = None,
-    ) -> dict:
-        """List process optimisations (read-only)."""
-        return {
-            "optimisations": [],
-            "count": 0,
-            "filter": {"process_id": process_id},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -242,5 +206,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

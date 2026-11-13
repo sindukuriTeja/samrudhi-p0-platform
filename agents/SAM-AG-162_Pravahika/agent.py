@@ -63,3 +63,18 @@ class Pravahika(BaseAgent):
     @authority_guard("tec.get_state")
     def get_state(self, workflow_id: str) -> dict:
         return self._workflows.get(workflow_id, {"error": "not found"})
+
+    def route_for_approval(
+        self,
+        request_type: str,
+        details: dict,
+    ) -> dict:
+        """Route a request outside delegated authority to human approval."""
+        import uuid as _uuid
+        return {
+            "request_id": f"REQ-{_uuid.uuid4().hex[:6].upper()}",
+            "request_type": request_type,
+            "details": details,
+            "status": "pending_human_approval",
+            "routed_at": datetime.now(timezone.utc).isoformat(),
+        }

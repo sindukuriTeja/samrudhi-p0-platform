@@ -1,4 +1,4 @@
-"""Samay — Time Management Agent (SAM-AG-065 · OPS-007).
+"""Samay — Production Scheduling (SAM-AG-065 · OPS-008).
 
 Phase 3 operations agent. Manages time, tracks time usage, optimises
 schedules, and reports time usage. Reports to Daksh (SAM-AG-002, AI COO).
@@ -15,14 +15,15 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Samay(BaseAgent):
-    """Time Management Agent."""
+    """Production Scheduling."""
 
     canonical_id = "SAM-AG-065"
     name = "Samay"
-    designation = "Time Management Agent"
+    designation = "Production Scheduling"
     agent_type = "thinking"
 
     AUTHORITY = {
+        "ops.schedule_packages": True,
         "ops.manage_time": True,
         "ops.track_time": True,
         "ops.optimize_schedule": True,
@@ -33,11 +34,11 @@ class Samay(BaseAgent):
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Samay, the Time Management Agent (SAM-AG-065 · OPS-007) of Samrudhi,
+    SYSTEM_PROMPT = """You are Samay, Production Scheduling (SAM-AG-065 · OPS-008) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-065 · Position: OPS-007
+- Canonical ID: SAM-AG-065 · Position: OPS-008
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
   Satya does NOT report to you and you cannot alter Satya's findings.
@@ -80,7 +81,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -242,3 +243,17 @@ HARD RULES — NEVER VIOLATE
             "status": "pending_human_approval",
             "routed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @authority_guard("ops.schedule_packages")
+    def schedule_packages(self, packages: list, start_date: str, days: int = 30) -> dict:
+        """Give every work package a deadline, spread evenly over the period."""
+        from datetime import timedelta
+        start = datetime.fromisoformat(start_date[:10])
+        n = len(packages or [])
+        out = []
+        for i, p in enumerate(packages or []):
+            due = start + timedelta(days=round(days * (i + 1) / max(n, 1)))
+            out.append({**p, "due_date": due.date().isoformat()})
+        return {"packages": out, "count": n, "period_days": days,
+                "status": "scheduled" if n else "nothing_to_schedule",
+                "scheduled_at": datetime.now(timezone.utc).isoformat()}

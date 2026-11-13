@@ -1,7 +1,11 @@
-"""Niyojan — Work Planning Agent (SAM-AG-060 · OPS-003).
+"""Niyojan — Resource & Capacity Lead (SAM-AG-060 · OPS-003).
 
-Phase 3 operations agent. Plans work, defines tasks, sets priorities, and
-schedules work. Reports to Daksh (SAM-AG-002, AI COO).
+Stage 2 Phase 3 operations, client, analytics and CEO-office agent (P1). Thinking agent: reasons with the local model; tools are authority-guarded and deterministic.
+Decide which resources a plan needs, set allocation policies, govern utilisation and
+balance workload across agents and human reviewers. [PDF 01A.05 · OPS-003 Resource &
+Capacity Management Lead]
+Reports to Daksh (AI COO, SAM-AG-002).
+Identity from the PDF canonical registry (Document 01C); role from the department register.
 """
 from datetime import datetime, timezone
 from typing import Any
@@ -13,59 +17,67 @@ from backend.core.authority import authority_guard
 from backend.core.message_bus import BusEnvelope, bus
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @register_agent
 class Niyojan(BaseAgent):
-    """Work Planning Agent."""
+    """Resource & Capacity Lead."""
 
     canonical_id = "SAM-AG-060"
     name = "Niyojan"
-    designation = "Work Planning Agent"
+    designation = "Resource & Capacity Lead"
     agent_type = "thinking"
 
     AUTHORITY = {
-        "ops.plan_work": True,
-        "ops.define_tasks": True,
-        "ops.set_priorities": True,
-        "ops.schedule_work": True,
-        "ops.escalate_planning_issue": True,
+        "ops.assess_resource_need": True,
+        "ops.set_allocation_policy": True,
+        "ops.review_utilisation": True,
+        "ops.balance_workload": True,
+        "ops.escalate_capacity_gap": True,
         "gov.certify": False,
         "gov.modify_finding": False,
         "tec.grant_access": False,
     }
 
-    SYSTEM_PROMPT = """You are Niyojan, the Work Planning Agent (SAM-AG-060 · OPS-003) of Samrudhi,
+    # tool method -> permission it requires (checked by the authority guard)
+    TOOLS = {
+        "assess_resource_need": "ops.assess_resource_need",
+        "set_allocation_policy": "ops.set_allocation_policy",
+        "review_utilisation": "ops.review_utilisation",
+        "balance_workload": "ops.balance_workload",
+        "escalate_capacity_gap": "ops.escalate_capacity_gap",
+    }
+
+    SYSTEM_PROMPT = """You are Niyojan, Resource & Capacity Lead (SAM-AG-060 · OPS-003) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-060 · Position: OPS-003
+- Canonical ID: SAM-AG-060 · Position: OPS-003 · Department: Operations & Delivery Management
 - You report to Daksh (AI COO, SAM-AG-002).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
-  Satya does NOT report to you and you cannot alter Satya's findings.
 
 YOUR MISSION
-Plan work, define tasks, set priorities, and schedule work. Every approved
-scope becomes a structured plan with tasks, owners, priorities and deadlines.
+Decide which resources a plan needs, set allocation policies, govern utilisation and balance
+workload across agents and human reviewers. [PDF 01A.05 · OPS-003 Resource & Capacity Management
+Lead]
 
 YOUR REGISTERS
-1. Work Plan Register — plans, scope, stages, deadlines
-2. Task Register — task definitions, owners, dependencies
-3. Priority Register — priority levels, rationale, changes
-4. Schedule Register — timelines, milestones, allocations
-5. Planning Issue Register — issues, escalations, resolutions
+1. Resource Need Register — plan, resource, quantity, period
+2. Allocation Policy Register — policy, scope, version
+3. Utilisation Register — agent, period, utilisation
 
 AUTHORITY MATRIX
-ops.plan_work · ops.define_tasks · ops.set_priorities · ops.schedule_work
-ops.escalate_planning_issue · gov.certify=False · gov.modify_finding=False
-tec.grant_access=False
+ops.assess_resource_need · ops.set_allocation_policy · ops.review_utilisation · ops.balance_workload · ops.escalate_capacity_gap
+gov.certify=False · gov.modify_finding=False · tec.grant_access=False
 
 HARD RULES — NEVER VIOLATE
-1. Never fabricate plan status — missing data = "unavailable".
-2. Never suppress a planning gap or underestimate effort dishonestly.
-3. Never change commercial terms — route to human.
-4. Respect tenant isolation — never cross-tenant data leakage.
-5. Satya's findings are immutable to you — read-only.
-6. Every task has an owner, priority and deadline.
-7. If the local model is down, report it honestly — do not fake output."""
+1. Never fabricate data. Missing information = "unavailable".
+2. Respect tenant isolation: never use one client's data for another.
+3. Satya's findings are immutable to you — read-only.
+4. Never overload an agent or reviewer beyond approved capacity.
+5. If the local model is down, report it honestly — do not fake output."""
 
     def run(self, task: str, **kwargs: Any) -> AgentResult:
         import json
@@ -80,7 +92,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -92,7 +104,7 @@ HARD RULES — NEVER VIOLATE
             )
         try:
             bus.publish_sync(BusEnvelope(
-                event_type="ops.plan",
+                event_type="ops.resources",
                 source_agent=self.canonical_id,
                 target_agent="all",
                 payload={"action": action, "task": task},
@@ -103,126 +115,79 @@ HARD RULES — NEVER VIOLATE
             pass
         return AgentResult(text=text, agent_id=self.canonical_id, tokens_used=tokens, status="completed")
 
-    @authority_guard("ops.plan_work")
-    def plan_work(
-        self,
-        workflow_id: str,
-        scope: str,
-        phases: list,
-    ) -> dict:
-        """Create a work plan for a workflow."""
-        plan_id = f"PLAN-{uuid.uuid4().hex[:6].upper()}"
+    # ------------------------------------------------------------------
+    # Niyojan's tools (authority-guarded)
+    # ------------------------------------------------------------------
+
+    @authority_guard("ops.assess_resource_need")
+    def assess_resource_need(self, plan_id: str, packages: list) -> dict:
+        """Assess resources a plan needs."""
         return {
+            "record_id": f"NIY-{uuid.uuid4().hex[:6].upper()}",
             "plan_id": plan_id,
-            "workflow_id": workflow_id,
+            "packages": packages,
+            "action": "assess_resource_need",
+            "status": "recorded",
+            "recorded_at": _now(),
+        }
+
+    @authority_guard("ops.set_allocation_policy")
+    def set_allocation_policy(self, policy: str, scope: str) -> dict:
+        """Set an allocation policy."""
+        return {
+            "record_id": f"NIY-{uuid.uuid4().hex[:6].upper()}",
+            "policy": policy,
             "scope": scope,
-            "phases": phases,
-            "status": "planned",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "action": "set_allocation_policy",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.define_tasks")
-    def define_tasks(
-        self,
-        plan_id: str,
-        tasks: list,
-    ) -> dict:
-        """Define tasks within a work plan."""
-        task_group_id = f"TASK-{uuid.uuid4().hex[:6].upper()}"
+    @authority_guard("ops.review_utilisation")
+    def review_utilisation(self, period: str) -> dict:
+        """Review utilisation for a period."""
         return {
-            "task_group_id": task_group_id,
+            "record_id": f"NIY-{uuid.uuid4().hex[:6].upper()}",
+            "period": period,
+            "action": "review_utilisation",
+            "status": "recorded",
+            "recorded_at": _now(),
+        }
+
+    @authority_guard("ops.balance_workload")
+    def balance_workload(self, agents: list) -> dict:
+        """Balance workload across agents."""
+        return {
+            "record_id": f"NIY-{uuid.uuid4().hex[:6].upper()}",
+            "agents": agents,
+            "action": "balance_workload",
+            "status": "recorded",
+            "recorded_at": _now(),
+        }
+
+    @authority_guard("ops.escalate_capacity_gap")
+    def escalate_capacity_gap(self, plan_id: str, gap: str) -> dict:
+        """Escalate a capacity gap."""
+        return {
+            "record_id": f"NIY-{uuid.uuid4().hex[:6].upper()}",
             "plan_id": plan_id,
-            "tasks": tasks,
-            "count": len(tasks),
-            "defined_at": datetime.now(timezone.utc).isoformat(),
+            "gap": gap,
+            "action": "escalate_capacity_gap",
+            "status": "recorded",
+            "recorded_at": _now(),
         }
 
-    @authority_guard("ops.set_priorities")
-    def set_priorities(
-        self,
-        plan_id: str,
-        priorities: dict,
-    ) -> dict:
-        """Set priorities for tasks in a plan."""
-        return {
-            "plan_id": plan_id,
-            "priorities": priorities,
-            "status": "prioritised",
-            "set_at": datetime.now(timezone.utc).isoformat(),
-        }
+    # ------------------------------------------------------------------
+    # Read-only and escalation
+    # ------------------------------------------------------------------
 
-    @authority_guard("ops.schedule_work")
-    def schedule_work(
-        self,
-        plan_id: str,
-        schedule: dict,
-    ) -> dict:
-        """Schedule work with timelines and milestones."""
-        schedule_id = f"SCH-{uuid.uuid4().hex[:6].upper()}"
+    def list_records(self, register: str | None = None) -> dict:
+        """List register records (read-only)."""
         return {
-            "schedule_id": schedule_id,
-            "plan_id": plan_id,
-            "schedule": schedule,
-            "status": "scheduled",
-            "scheduled_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    @authority_guard("ops.escalate_planning_issue")
-    def escalate_planning_issue(
-        self,
-        issue_type: str,
-        description: str,
-        severity: str,
-        affected_plans: list,
-    ) -> dict:
-        """Escalate a planning issue to human Board."""
-        incident_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
-        return {
-            "incident_id": incident_id,
-            "issue_type": issue_type,
-            "description": description,
-            "severity": severity,
-            "affected_plans": affected_plans,
-            "status": "escalated",
-            "escalated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def list_plans(
-        self,
-        workflow_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List work plans (read-only)."""
-        return {
-            "plans": [],
+            "records": [],
             "count": 0,
-            "filter": {"workflow_id": workflow_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def list_tasks(
-        self,
-        plan_id: str | None = None,
-        status: str | None = None,
-    ) -> dict:
-        """List tasks (read-only)."""
-        return {
-            "tasks": [],
-            "count": 0,
-            "filter": {"plan_id": plan_id, "status": status},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_schedule_status(
-        self,
-        plan_id: str | None = None,
-    ) -> dict:
-        """Get schedule status (read-only)."""
-        return {
-            "schedules": [],
-            "count": 0,
-            "filter": {"plan_id": plan_id},
-            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "filter": {"register": register},
+            "queried_at": _now(),
         }
 
     def route_for_approval(
@@ -237,5 +202,5 @@ HARD RULES — NEVER VIOLATE
             "request_type": request_type,
             "details": details,
             "status": "pending_human_approval",
-            "routed_at": datetime.now(timezone.utc).isoformat(),
+            "routed_at": _now(),
         }

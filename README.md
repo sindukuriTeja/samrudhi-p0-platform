@@ -28,7 +28,9 @@ Production-grade, locally-run agentic AI platform. All agents run on **Ollama** 
 ```
 samrudhi-p0/
 ├── config/
-│   └── settings.py              # env-based config (pydantic-settings)
+│   ├── settings.py              # env-based config (pydantic-settings)
+│   ├── agent_registry.yaml      # canonical registry of the 79 built agents (PDF Document 01C)
+│   └── project_flows.yaml       # project flow used by the Control Room runner
 ├── backend/
 │   ├── main.py                  # FastAPI app + startup/shutdown
 │   ├── database.py              # async SQLAlchemy engine + session
@@ -52,40 +54,8 @@ samrudhi-p0/
 │   └── tasks.py                 # run_agent_task dispatcher
 ├── agents/
 │   ├── base.py                  # BaseAgent + dynamic registry loader
-│   ├── SAM-AG-001_Arjun/        # AI CEO (Stage 1A)
-│   ├── SAM-AG-002_Daksh/        # AI COO — Delivery Orchestrator (Phase 1)
-│   ├── SAM-AG-003_Aarya/        # AI CCO — Creative/Content (Phase 1)
-│   ├── SAM-AG-004_Mitra/        # AI CXO — Client Experience (Phase 1)
-│   ├── SAM-AG-007_Sutra/        # AI CTO (Stage 1A)
-│   ├── SAM-AG-009_Medha/        # AI Head of Intelligence (Phase 1)
-│   ├── SAM-AG-010_Satya/        # Chief Assurance Agent (Stage 1A)
-│   ├── SAM-AG-011_Prakash/      # Compliance verification (Stage 1C)
-│   ├── SAM-AG-012_Rajat/        # Risk assessment (Stage 1C)
-│   ├── SAM-AG-013_Niti/         # Policy governance (Stage 1C)
-│   ├── SAM-AG-014_Satark/       # Security review (Stage 1C)
-│   ├── SAM-AG-015_Sachit/       # Evidence management (Stage 1C)
-│   ├── SAM-AG-016_Pramaan/      # Certification (Stage 1C)
-│   ├── SAM-AG-017_Aarogya/      # Quality assurance (Stage 1C)
-│   ├── SAM-AG-018_Samay/        # SLA monitoring (Stage 1C)
-│   ├── SAM-AG-019_Sabhyata/     # Audit trail (Stage 1C)
-│   ├── SAM-AG-020_Ansh/         # Incident response (Stage 1C)
-│   ├── SAM-AG-021_Benchmark/    # Benchmarking (Stage 1C)
-│   ├── SAM-AG-022_Satark2/      # Anomaly detection (Stage 1C)
-│   ├── SAM-AG-153_Vinyas/       # Platform architecture service (Stage 1B)
-│   ├── SAM-AG-154_Setubandh/    # MCP connector service (Stage 1B)
-│   ├── SAM-AG-155_Yantra/       # Runtime orchestration service (Stage 1B)
-│   ├── SAM-AG-156_Smaran/       # Context/memory service (Stage 1B)
-│   ├── SAM-AG-157_Suraksha/     # Security enforcement service (Stage 1B)
-│   ├── SAM-AG-158_Niyantrak/    # AgentOps & DWMS Lead (Stage 1A)
-│   ├── SAM-AG-159_Pehchaan/     # Identity registry service (Stage 1B)
-│   ├── SAM-AG-160_Jod/          # Integration connector service (Stage 1B)
-│   ├── SAM-AG-161_Adhikar/      # Permission/access service (Stage 1B)
-│   ├── SAM-AG-162_Pravahika/    # Workflow orchestration service (Stage 1B)
-│   ├── SAM-AG-163_Sandarbhika/  # Context retrieval service (Stage 1B)
-│   ├── SAM-AG-166_Nirikshak/    # Telemetry/monitoring service (Stage 1B)
-│   ├── SAM-AG-167_Parikshak/    # Testing/QA service (Stage 1B)
-│   ├── SAM-AG-168_Sanskaran/    # Version control service (Stage 1B)
-│   └── SAM-AG-170_Chaukidar/    # Security monitoring service (Stage 1B)
+│   ├── SAM-AG-<id>_<Name>/      # 79 agents: one folder per canonical ID
+│   │                            # IDs, positions, titles and managers: config/agent_registry.yaml
 ├── tests/
 │   ├── conftest.py              # SQLite test DB setup
 │   ├── test_authority.py        # authority guard tests
@@ -128,6 +98,132 @@ Health check: `http://localhost:8000/api/health`
 ```bash
 celery -A workers.celery_app worker --loglevel=info
 ```
+On Windows add `--pool=solo`.
+
+## Control Room (web UI + project flow)
+
+One command runs everything (Redis via Docker if it is not running, migrations,
+agent-registry seed, Celery worker, API + UI):
+```bash
+python -m scripts.run_all
+```
+- New UI: `http://localhost:8000/` — Projects (new project, start, live run, approvals), History, Agents
+- Previous UI: `http://localhost:8000/legacy/` (agent detail, activation gate, lifecycle transitions)
+- API docs: `http://localhost:8000/docs`
+
+A project runs the documented chain in `config/project_flows.yaml`, taken from
+"How a Project Runs" and the PDF pilot sequence (Document 01C §7): 10 blocks from the start
+check (Adhikar) and kick-off (Arjun, Samanvay) through client understanding (Mitra, Smriti,
+Shruti), delivery planning (Daksh, Yojana, Sankalan, Samay, Niyojan, Kshamata, Vitaran,
+Pravartan), content decisions (Aarya, Anvesh, Disha, Kalpana, Tarangini), production (Lekha,
+Roop, Chitra), checks (Shuddhi, Pariksha, Gunvatta, Swasthya, Gopniya, Nirikshan, Pramaan,
+Sweekriti), publishing, measurement and close (Arjun's final brief).
+
+- Model steps run the agent through the existing `run_agent_task` Celery task; code steps run the
+  agent's own authority-guarded tool (work packages, schedule, assignments, claim screening,
+  privacy check, acceptance, cost); steps with no real data yet are recorded as skipped with
+  the reason.
+- Checkers send work back: Punargathan opens a rework round, Lekha/Roop/Chitra run again and
+  every check repeats; after 3 rounds a human decides.
+- Human Gate 1 after Tarangini (direction and calendar) and Gate 2 after Sweekriti (final
+  content). "Approve with changes" re-runs the documented steps with your note.
+- The runner refuses agents that are not Active and checks every step's permission. The start
+  screen can run the existing activation gate for all missing agents in one click (signed-in
+  founder or assurance lead); agents that fail the gate stay inactive.
+
+Structured outputs: every model step returns one JSON object in the shape given by its
+`output` schema in the flow file (Ollama JSON mode). The runner validates it in code (fields,
+types, one item per post), asks the agent once more with the exact problems if it is wrong, and
+stops the step after a second failure. The next agents receive the whole structured record, the
+code checks read the posts' text from it, and values the model must not decide are set in code
+(research facts stay "not verified" until a live source connector exists). Each record is also
+saved to the agent's register: initiatives, actions, workflow_instances (Daksh's state machine
+from planning to delivered), work_packages, allocations, content_strategies, content_calendars,
+content_packages, qa_reviews, approval_workflows, client_communications, reports and briefs.
+
+Planning drives production: Sankalan's work packages, Samay's due dates, Kshamata's capacity
+check and Vitaran's assignments decide who produces what. Vitaran assigns a package only to
+agents that are Active and under `max_per_agent`; Pravartan turns the assignments into the
+production plan, and each producer (Lekha, Roop, Chitra) receives exactly its packages and must
+return one item per package. A producer with no packages is skipped.
+
+Safety rules in code (`config/safety_rules.yaml`, matched by `backend/core/safety_rules.py`; no
+model decides them). Global rules apply to every client; a client's block can add forbidden
+claims, patterns and required disclaimers, never remove a global one.
+- Lekha and Shuddhi are given the client's rules, but the code still checks the result.
+- Shuddhi: after the model's review, forbidden claims, forbidden patterns (cure claims, "best
+  hospital", guarantees, "stop your medication"…), other clients' names and figures that are not
+  in Anvesh's research pack force a send-back, even if the model said pass.
+- Gunvatta: every post has headline, caption and call to action filled in, no repeated
+  captions, captions within the length limit.
+- Swasthya: forbidden claims and patterns in every post and in the artwork text, and the
+  client's required disclaimer on every post.
+- Gopniya: personal data and the names of the other clients.
+- Prakash (release guard): schedules only if a signed-in human approved Gate 2 and a fresh
+  check of the final copy finds nothing; otherwise the project stops for a human.
+- Any failed check sends the work back through Punargathan; after `max_rework_rounds` (3) a
+  human decides. The rules for a client: `GET /api/projects/safety-rules?client_id=…`.
+
+Real information (Knowledge page, `#/knowledge`; settings in `config/knowledge.yaml`):
+- Client knowledge store (`client_profiles`): brand voice, audience, services, locations, key
+  messages. Smriti's step is code: it loads the approved profile and the client's rules. A client
+  with no approved profile stops at Smriti with the reason; nothing is invented.
+- Source library (`knowledge_sources`): a signed-in person adds a page (fetched from an allowed
+  https health site, or pasted text). Fetching refuses other sites, private and local addresses,
+  unsafe redirects, non-web files and pages over 2 MB. Agents never fetch or browse.
+- Four-eyes rule in code: a profile edit or a new source is a draft until a *different*
+  signed-in person approves it (roles in `config/knowledge.yaml`); any edit resets the approval.
+- Anvesh receives only the approved passages that match the project and must cite a
+  `source_id` and an exact `quote` per fact. His guarded `verify_facts` tool marks a fact
+  verified only if the quote is in that approved source and the fact's figures are in the quote;
+  title, publisher and link come from the library. Shuddhi accepts a figure in a post only if
+  it is in a verified fact.
+- Finding new client hospitals (Khoj, Sampark, Lakshit) is Phase 6 Sales work and not built.
+
+API: `GET/PUT /api/knowledge/clients/{id}`, `POST /api/knowledge/clients/{id}/approve`,
+`GET/POST /api/knowledge/sources`, `POST /api/knowledge/sources/fetch`,
+`POST /api/knowledge/sources/{id}/approve|retire`, `GET /api/knowledge/search?q=`.
+Migration `0003_knowledge.py` adds the two tables.
+
+Telemetry, cost and certification:
+- Telemetry (`execution_log`): the real start and end time, latency, prompt and response tokens
+  and model seconds of every agent run (collected from the model client while the agent runs),
+  and the true status: a "model unavailable" or failed run is logged as failed.
+- Cost and KPIs in code (`backend/projects/metrics.py`, `config/costing.yaml`): each project is
+  measured from its own records (tokens, model time, rework rounds, checks passed first time,
+  gate waits, packages published by Samay's due dates, facts verified, accepted deliverables).
+  Lagaat's `cost_report` turns that into cost per accepted deliverable using the configured
+  rates; an unset rate is reported as unavailable, never guessed. Lakshya's `evaluate_kpis`
+  compares each KPI with its target. History shows both per project.
+- Certification (Assurance page, `#/assurance`): the activation gate no longer accepts "a run()
+  method exists". It needs (1) the agent's code competency tests passing now — identity,
+  governance limits, escalation, tools, and the expected decisions of its code tools (e.g.
+  Swasthya blocks a cure claim, Vitaran refuses an over-capacity assignment, Prakash refuses
+  unapproved content) — and (2) a valid certification by a signed-in assurance lead, based on
+  that evidence plus a model test for thinking agents (each answers its real step instructions
+  and must return the structured result). Certifications are tied to the agent's code
+  fingerprint, expire after 90 days and can be revoked. Competency tests never send real bus
+  events.
+
+API: `GET /api/assurance/agents`, `POST /api/assurance/code-tests`, `POST /api/assurance/model-tests`,
+`POST /api/assurance/agents/{id}/certify|revoke`, `GET /api/assurance/projects/{id}/metrics`.
+Migration `0004_competency_runs.py` adds the evidence table and `approval_signoffs`.
+
+Gate 2 sign-off and tenant isolation:
+- Gate 2 needs two parties, enforced in code: a qualified reviewer (assurance lead or founder)
+  AND an authorised contact of the project's own client (role `client_approver`; demo account
+  `client_demo` for DEMO-HEALTHCARE-01). One person cannot sign for both; either party can reject
+  or ask for changes on their own. Nothing is published until both have approved, and Prakash's
+  release guard checks the final decision. Client contacts can do nothing else (no project
+  starts, stops, messages or Gate 1).
+- Tenant isolation (`backend/core/tenancy.py`): before any agent step runs, the data handed to it
+  is checked for another client's id or name; if found, the step is not run and the project
+  stops for a person. The human team's own instructions are not scanned; Gopniya checks the
+  output again.
+
+New tables (Alembic migration `migrations/versions/0001_project_tables.py`):
+`projects`, `project_messages`, `project_steps`, `approval_decisions`;
+migration `0002_step_result_json.py` adds `project_steps.result_json`.
 
 ## Adding a new agent
 
@@ -142,9 +238,9 @@ celery -A workers.celery_app worker --loglevel=info
 - **Phase 0 (Platform):** ✅ Complete — DB models, message bus, authority guard, auth, LLM queue, lifecycle gate, FastAPI, Celery.
 - **Stage 1A (Core agents):** ✅ Complete — Arjun, Sutra, Satya, Niyantrak.
 - **Stage 1B (Technology services):** ✅ Complete — 14 service-first agents (Vinyas, Setubandh, Yantra, Smaran, Suraksha, Pehchaan, Jod, Adhikar, Pravahika, Sandarbhika, Nirikshak, Parikshak, Sanskaran, Chaukidar). All enforce authority guard; graceful model-unavailable handling.
-- **Stage 1C (Assurance agents):** ✅ Complete — 12 thinking agents under Satya (Prakash, Rajat, Niti, Satark, Sachit, Pramaan, Aarogya, Samay, Sabhyata, Ansh, Benchmark, Satark2). Full assurance spectrum: compliance, risk, policy, security, evidence, certification, quality, SLA, audit, incidents, benchmarking, anomaly detection.
+- **Stage 1C (Assurance agents):** 12 agents under Satya, as in the PDF registry: Pramana, Nishtha, Maryada, Seema, Gopniya, Sakshi, Sankat (service-first, no model) and Yogyata, Pramanik, Gunvatta, Nishpaksh, Swasthya (role agents that judge but never produce). Swasthya blocks high-risk health claims in code; Gopniya flags personal and other-client data; Pramanik recommends but cannot certify.
 - **Phase 1 (P1 Pilot Leadership):** ✅ Complete — 4 executive agents (Daksh COO, Aarya CCO, Mitra CXO, Medha Intelligence). Each has 13 authority-guarded tools, 5 registers (20 new DB tables), workflow state machines, and full I/O contracts. Build order: Daksh → Aarya → Mitra → Medha.
-- **Total tests:** 86 passing.
+- **Registry:** `config/agent_registry.yaml` is the single source of truth for every agent's ID, position, title, department and manager, taken from the PDF canonical registry. `python -m scripts.seed_agents` reconciles the database with it, and `tests/test_registry.py` fails if the code drifts from it.
 
 ## Next Steps (per build plan)
 

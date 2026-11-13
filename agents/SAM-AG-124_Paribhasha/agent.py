@@ -1,4 +1,4 @@
-"""Paribhasha — Data Definitions Agent (SAM-AG-124).
+"""Paribhasha — KPI Definition Governance (SAM-AG-124).
 
 Phase 3 analytics/data agent. Owns data definitions: defines metrics, maintains
 glossary, updates definitions, reports definitions status, and escalates
@@ -16,11 +16,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Paribhasha(BaseAgent):
-    """Data Definitions Agent."""
+    """KPI Definition Governance."""
 
     canonical_id = "SAM-AG-124"
     name = "Paribhasha"
-    designation = "Data Definitions Agent"
+    designation = "KPI Definition Governance"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -34,11 +34,11 @@ class Paribhasha(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Paribhasha, the Data Definitions Agent (SAM-AG-124 · DAT-008) of Samrudhi,
+    SYSTEM_PROMPT = """You are Paribhasha, KPI Definition Governance (SAM-AG-124 · DAT-010) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-124 · Position: DAT-008
+- Canonical ID: SAM-AG-124 · Position: DAT-010
 - You report to Medha (AI Head of Analytics, SAM-AG-009).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
@@ -85,7 +85,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:

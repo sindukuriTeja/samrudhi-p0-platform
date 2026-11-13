@@ -1,4 +1,4 @@
-"""Prakash — Healthcare Publishing Agent (SAM-AG-084).
+"""Prakash — Content Publishing (SAM-AG-084).
 
 Phase 2 content pilot agent. Owns healthcare content publishing:
 publishes approved content to channels, tracks publishing status, manages release.
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Prakash(BaseAgent):
-    """Healthcare Publishing Agent."""
+    """Content Publishing."""
 
     canonical_id = "SAM-AG-084"
     name = "Prakash"
-    designation = "Healthcare Publishing Agent"
+    designation = "Content Publishing"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -32,11 +32,11 @@ class Prakash(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Prakash, the Healthcare Publishing Agent (SAM-AG-084 · CRT-019) of Samrudhi,
+    SYSTEM_PROMPT = """You are Prakash, Content Publishing (SAM-AG-084 · CRT-010) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-084 · Position: CRT-019
+- Canonical ID: SAM-AG-084 · Position: CRT-010
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
@@ -73,7 +73,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
@@ -125,8 +125,32 @@ HARD RULES — NEVER VIOLATE
         content_ref: str,
         scheduled_time: str,
         channels: list,
+        approval: dict = None,
+        final_check: dict = None,
     ) -> dict:
-        """Schedule a content release."""
+        """Schedule a content release.
+
+        Release guard (in code): when the approval and the final check are given, content is
+        scheduled only if a signed-in human approved it (Gate 2) and the final safety check of
+        the exact copy being released found nothing. Otherwise nothing is scheduled.
+        """
+        reasons = []
+        if approval is not None:
+            if (approval or {}).get("decision") not in ("approve", "approve_with_changes"):
+                reasons.append("the final content has no human approval (Gate 2)")
+            elif not approval.get("decided_by") or str(approval.get("decided_by")).startswith("SAM-AG-"):
+                reasons.append("the approval was not made by a signed-in human")
+        if final_check is not None and not (final_check or {}).get("passed"):
+            found = (final_check or {}).get("findings") or ["the final check did not pass"]
+            reasons.append("the final safety check found: " + "; ".join(str(x) for x in found[:5]))
+        if reasons:
+            return {
+                "client_id": client_id,
+                "content_ref": content_ref,
+                "status": "refused",
+                "reasons": reasons,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
         schedule_id = f"SCH-{uuid.uuid4().hex[:6].upper()}"
         return {
             "schedule_id": schedule_id,

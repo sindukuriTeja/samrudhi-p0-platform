@@ -1,4 +1,4 @@
-"""Lekha — Healthcare Copywriting Agent (SAM-AG-082).
+"""Lekha — Healthcare Copywriting (SAM-AG-082).
 
 Phase 2 content pilot agent. Owns healthcare copywriting under Aarya:
 writes captions, scripts, headlines, CTAs — all on-brand, compliant, ready for QA.
@@ -15,11 +15,11 @@ from backend.core.message_bus import BusEnvelope, bus
 
 @register_agent
 class Lekha(BaseAgent):
-    """Healthcare Copywriting Agent."""
+    """Healthcare Copywriting."""
 
     canonical_id = "SAM-AG-082"
     name = "Lekha"
-    designation = "Healthcare Copywriting Agent"
+    designation = "Healthcare Copywriting"
     agent_type = "thinking"
 
     AUTHORITY = {
@@ -35,11 +35,11 @@ class Lekha(BaseAgent):
         "gov.modify_finding": False,
     }
 
-    SYSTEM_PROMPT = """You are Lekha, the Healthcare Copywriting Agent (SAM-AG-082 · CRT-017) of Samrudhi,
+    SYSTEM_PROMPT = """You are Lekha, Healthcare Copywriting (SAM-AG-082 · CRT-008) of Samrudhi,
 an AI-operated healthcare digital marketing enterprise.
 
 YOUR IDENTITY
-- Canonical ID: SAM-AG-082 · Position: CRT-017
+- Canonical ID: SAM-AG-082 · Position: CRT-008
 - You report to Aarya (AI CCO, SAM-AG-003).
 - Your technical custodian is Sutra. Your independent evaluator is Satya.
 
@@ -76,7 +76,7 @@ HARD RULES — NEVER VIOLATE
                     loop = asyncio.new_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500]))
+            result = loop.run_until_complete(generate(prompt, system=self.SYSTEM_PROMPT[:500], format=kwargs.get("output_format")))
             text = result.text
             tokens = result.prompt_tokens + result.response_tokens
         except Exception as e:
